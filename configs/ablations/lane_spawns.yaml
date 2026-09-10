@@ -1,0 +1,4 @@
+# Spawn across the centre line 30 m apart instead of in opposite corners.
+inherit: ../base.yaml
+env:
+  spawn_mode: lanes

@@ -1,7 +1,2 @@
-# Milestone 4: role conditioning + diversity bonus on top of base.
+# Roles + diversity bonus + role rewards (now the base default); kept as a named entry point.
 inherit: base.yaml
-roles:
-  enabled: true
-diversity:
-  enabled: true
-  beta: 0.05

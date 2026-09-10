@@ -108,6 +108,7 @@ def rollout(cfg: dict, policy, opponent: str, seed: int, max_steps: int, frame_s
     rend.close()
     return {"imgs": imgs, "times": times, "frames": frames, "events": events, "winner": winner, "length": length,
             "dt": ec.dt, "boxes": frames[0]["boxes"], "box_kind": frames[0]["box_kind"], "team": frames[0]["team"],
+            "role": frames[0]["role"], "active": env.state.active[0].copy() if not done[0] else frames[0]["alive"] | True,
             "arena": ec.arena_size}
 
 
@@ -187,9 +188,12 @@ def trace_image(r: Dict, px: float = 8.0) -> Image.Image:
             a = 0.25 + 0.75 * k / len(pts)
             c = tuple(int(v * a + 28 * (1 - a)) for v in col)
             d.line([P(pts[k - 1][0]), P(pts[k][0])], fill=c, width=2)
+        if not pts[0][1]:
+            continue                                                   # inactive slot this episode
         p0 = P(pts[0][0])
         d.ellipse([p0[0] - 4, p0[1] - 4, p0[0] + 4, p0[1] + 4], outline=col, width=2)
-        d.text((p0[0] + 6, p0[1] - 6), str(i), fill=col)
+        role = "AFO"[int(r["role"][i]) % 3] if "role" in r else ""
+        d.text((p0[0] + 6, p0[1] - 6), f"{i}{role}", fill=col)
     for t, shooter, victim, pos, friendly in r["events"]["hits"]:
         p = P(pos)
         c = (255, 200, 0) if friendly else (255, 80, 80)
@@ -200,7 +204,7 @@ def trace_image(r: Dict, px: float = 8.0) -> Image.Image:
         d.line([p[0] - 6, p[1] + 6, p[0] + 6, p[1] - 6], fill=(255, 255, 255), width=2)
         d.text((p[0] + 8, p[1] - 6), f"{t * r['dt']:.1f}s", fill=(255, 255, 255))
     out = {0: "WIN", 1: "LOSS", -1: "DRAW"}[r["winner"]]
-    _label(im, f"{out} in {r['length'] * r['dt']:.1f}s  |  o start  x death  red o hit  yellow o friendly hit")
+    _label(im, f"{out} in {r['length'] * r['dt']:.1f}s | o start (A assault, F flanker, O overwatch)  x death  red o hit  yellow o friendly")
     return im
 
 

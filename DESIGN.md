@@ -47,13 +47,31 @@
   conv-MLP actor; on a 4-core CPU the full loop drops to ~120 env-steps/s.  Use a GPU, or
   the `conv_mlp_encoder` ablation for CPU experiments.
 
+## Corner spawns and role-focused squad play
+
+* **Spawns.** `spawn_mode: corners` (default) puts team A's spawn centre 6 m from a random
+  diagonal corner and team B at the point mirror, so squads start ~49 m apart in opposite
+  corners and must cross the whole arena; `lanes` restores the 30 m centre-line spawns.
+  Obstacle generation keeps the usual 3 m clearance around both spawn zones.
+* **Role incentives** (`roles.rewards`, all small compared with the +1 terminal reward):
+  assault +0.005/hp for damage dealt from within 10 m; flanker +0.01/hp for hits landing in
+  the victim's rear half (engagement angle > 90 degrees); overwatch +0.002 per step per
+  enemy that only it sees from >= 12 m, and +0.005/hp for teammates' damage on an enemy
+  it currently watches.  Any pair of shooters that produce a crossfire hit both get +0.1.
+  These make the roles' optimal behaviours differ by construction; the discriminator
+  bonus (now over six statistics, adding flank fraction and unique spotting) keeps them
+  distinguishable even where the incentives overlap.  `ablations/no_role_rewards.yaml`
+  isolates their effect, `no_roles.yaml` removes roles entirely.
+* **Squad sizes** are weighted 70% 3v3 so full-role squads dominate; 2v2 / 3v2 / 2v3 remain
+  at 10% each so the policy still handles a missing role.
+
 ## Assumptions carried over from v1
 
 * **Frames.** Local frame is x forward, y left.  Team B's world is point-mirrored about the
   arena centre `(x, y) -> (S - x, S - y)`, `theta -> theta + pi` for the critic's global
   state and obstacle encoding, so a single shared network sees the same problem from
   either side.  Actor observations are egocentric so they need no mirroring.
-* **Spawns.** Team A's centre is at x = 9, y in [20, 28]; team B is the point mirror.
+* **Spawns (lanes mode).** Team A's centre is at x = 9, y in [20, 28]; team B is the point mirror.
 * **Sightings** use an exact line-of-sight test (enemy inside +/-30 degrees, within range,
   segment not blocked by a wall or another body), independent of the 32 ray samples.
 * **Dead agents** stop colliding and occluding, receive zero observations, and stay in the

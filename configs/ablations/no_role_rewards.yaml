@@ -1,0 +1,6 @@
+# Roles + diversity bonus, but without the role-specific / crossfire incentives.
+inherit: ../base.yaml
+roles:
+  enabled: true
+  rewards:
+    enabled: false

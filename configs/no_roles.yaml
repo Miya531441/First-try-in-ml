@@ -1,0 +1,6 @@
+# Ablation: no role conditioning, no diversity bonus, no role rewards.
+inherit: base.yaml
+roles:
+  enabled: false
+diversity:
+  enabled: false

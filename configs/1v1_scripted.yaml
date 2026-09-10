@@ -1,5 +1,9 @@
 # Milestone 2: 1v1 against scripted bots, no roles, hp tiebreak on timeout.
 inherit: base.yaml
+roles:
+  enabled: false
+diversity:
+  enabled: false
 env:
   team_size: 1
   team_sizes: [[1, 1]]

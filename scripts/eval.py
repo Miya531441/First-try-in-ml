@@ -57,7 +57,7 @@ def run_matches(cfg: dict, policy, opponent: str, episodes: int, num_envs: int =
     T = env.T
     res = {"win": [], "loss": [], "draw": [], "length": [], "pair_dist": [], "first_contact": [], "shots": 0,
            "hits_enemy": 0, "hits_ally": 0, "engage": [], "damage_dealt": [], "damage_taken": [],
-           "coverage_entropy": [], "crossfire": []}
+           "coverage_entropy": [], "crossfire": [], "role": {}}
     n = 0
     while n < episodes:
         a = np.zeros((num_envs, env.N, 4), np.float32)
@@ -88,11 +88,27 @@ def run_matches(cfg: dict, policy, opponent: str, episodes: int, num_envs: int =
                 res["hits_ally"] += float(ep["hits_ally"][k, :T].sum())
                 res["engage"] += list(ep["engage_angles"][k])
                 res["damage_dealt"].append(float(ep["damage_dealt"][k, :T].sum()))
+                for i in range(T):
+                    if not ep["active"][k, i]:
+                        continue
+                    rr = res["role"].setdefault(int(ep["roles"][k, i]), {"shots": 0.0, "hits": 0.0, "flank": 0.0, "stats": []})
+                    rr["shots"] += float(ep["shots"][k, i])
+                    rr["hits"] += float(ep["hits_enemy"][k, i])
+                    rr["flank"] += float(ep["flank_hits"][k, i])
+                    rr["stats"].append(ep["agent_stats"][k, i])
                 res["damage_taken"].append(float(ep["damage_taken"][k, :T].sum()))
             for r in runners:
                 r.reset(ep["idx"], obs)
             if bot is not None:
                 bot.reset(ep["idx"])
+    per_role = {}
+    for r, d in sorted(res["role"].items()):
+        st = np.mean(d["stats"], 0)
+        per_role[["assault", "flanker", "overwatch"][r] if r < 3 else f"role{r}"] = {
+            "shots_per_episode": d["shots"] / max(n, 1), "accuracy": d["hits"] / max(d["shots"], 1),
+            "flank_fraction": d["flank"] / max(d["hits"], 1), "dist_to_centroid_m": float(st[0] * ec.arena_size),
+            "dist_to_nearest_enemy_m": float(st[1] * ec.arena_size), "distance_travelled_norm": float(st[3]),
+            "unique_spotting_fraction": float(st[5])}
     hist, _ = np.histogram(res["engage"], bins=ANGLE_BINS)
     hist = hist / max(hist.sum(), 1)
     return {
@@ -110,6 +126,7 @@ def run_matches(cfg: dict, policy, opponent: str, episodes: int, num_envs: int =
         "damage_dealt": float(np.mean(res["damage_dealt"])), "damage_taken": float(np.mean(res["damage_taken"])),
         "engage_angle_hist(0-45,45-90,90-135,135-180)": [round(float(x), 3) for x in hist],
         "flank_fraction(>90deg)": float(np.mean(np.array(res["engage"]) > 90)) if res["engage"] else float("nan"),
+        "per_role": per_role,
     }
 
 
@@ -158,6 +175,14 @@ def main():
         print(f"| {r['opponent']} | {r['win_rate']:.2f} | {r['draw_rate']:.2f} | {r['loss_rate']:.2f} | {r['shot_accuracy']:.2f} | "
               f"{r['friendly_fire_rate']:.3f} | {r['teammate_pair_distance_m']:.1f} m | {r['time_to_first_contact_s']:.1f} s | "
               f"{r['flank_fraction(>90deg)']:.2f} | {r['crossfire_rate']:.2f} | {r['angular_coverage_entropy']:.2f} |")
+    roles_seen = [r for r in results if r["per_role"]]
+    if roles_seen:
+        print("\n| opponent | role | shots/ep | acc | flank | dist to squad | dist to enemy | spotting |")
+        print("|---|---|---|---|---|---|---|---|")
+        for r in roles_seen:
+            for name, d in r["per_role"].items():
+                print(f"| {r['opponent']} | {name} | {d['shots_per_episode']:.1f} | {d['accuracy']:.2f} | {d['flank_fraction']:.2f} | "
+                      f"{d['dist_to_centroid_m']:.1f} m | {d['dist_to_nearest_enemy_m']:.1f} m | {d['unique_spotting_fraction']:.2f} |")
     if args.out:
         with open(args.out, "w") as f:
             json.dump(summary, f, indent=1)

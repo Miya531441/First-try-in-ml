@@ -114,7 +114,7 @@ def test_league_sampling_and_elo(tmp_path):
 
 
 def test_discriminator_bonus_is_zero_centred_then_learns():
-    d = RoleDiscriminator(3, beta=0.05)
+    d = RoleDiscriminator(3, beta=0.05, stat_dim=4)
     stats = np.random.default_rng(0).normal(size=(4, 4)).astype(np.float32)
     roles = np.array([0, 1, 2, 0])
     b0 = d.bonus(stats, roles)

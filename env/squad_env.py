@@ -118,6 +118,7 @@ class SquadVecEnv:
         self.ep_pair_sum, self.ep_pair_steps = z(E, 2), z(E, 2)
         self.ep_cov_ent_sum, self.ep_cov_steps = z(E, 2), z(E, 2)
         self.ep_crossfire = z(E, 2)
+        self.ep_flank_hits, self.ep_spot_steps, self.ep_close_damage = z(E, N), z(E, N), z(E, N)
         self.ep_reward = z(E, N)
         self.ep_first_contact = np.full(E, -1, np.int64)
         self.ep_engage_angles = [[] for _ in range(E)]
@@ -125,7 +126,8 @@ class SquadVecEnv:
     def _reset_stats(self, idx):
         for arr in (self.ep_shots, self.ep_hits_enemy, self.ep_hits_ally, self.ep_damage_dealt, self.ep_damage_taken,
                     self.ep_dist, self.ep_centroid_sum, self.ep_nearest_enemy_sum, self.ep_alive_steps, self.ep_pair_sum,
-                    self.ep_pair_steps, self.ep_cov_ent_sum, self.ep_cov_steps, self.ep_crossfire, self.ep_reward):
+                    self.ep_pair_steps, self.ep_cov_ent_sum, self.ep_cov_steps, self.ep_crossfire, self.ep_reward,
+                    self.ep_flank_hits, self.ep_spot_steps, self.ep_close_damage):
             arr[idx] = 0
         self.ep_first_contact[idx] = -1
         for e in idx:
@@ -388,11 +390,18 @@ class SquadVecEnv:
         self.ep_nearest_enemy_sum += np.where(np.isfinite(enemy_dist), enemy_dist, cfg.arena_size) * alive_f
 
         eng = np.full((E, N), np.nan, np.float32)
+        rr = cfg.role_rewards
+        role_on = cfg.roles_enabled and rr.enabled
         if enemy_hit.any():
             rel = st.pos[ee2, ss2] - st.pos[ee2, vv2]
             bearing = np.arctan2(rel[:, 1], rel[:, 0])
             ang = np.abs(wrap_angle(bearing - st.theta[ee2, vv2]))
+            hit_dist = np.linalg.norm(rel, axis=-1)
             eng[ee2, ss2] = np.rad2deg(ang)
+            flank = ang > np.deg2rad(rr.flank_angle_deg)
+            close = hit_dist <= rr.assault_close_range
+            self.ep_flank_hits[ee2, ss2] += flank
+            self.ep_close_damage[ee2, ss2] += cfg.damage * close
             for e_, a_ in zip(ee2, ang):
                 self.ep_engage_angles[e_].append(float(np.rad2deg(a_)))
             # crossfire: another teammate hit the same victim within 2 s from a bearing >= 45 deg apart
@@ -401,10 +410,34 @@ class SquadVecEnv:
                 mates = self.allies[s_]
                 recent = self.last_hit_time[e_, v_, mates] >= tnow[e_] - 2.0
                 apart = np.abs(wrap_angle(self.last_hit_bearing[e_, v_, mates] - b_)) >= np.deg2rad(45)
-                if (recent & apart).any():
+                cross = recent & apart
+                if cross.any():
                     self.ep_crossfire[e_, st.team[e_, s_]] += 1
+                    if role_on:
+                        reward[e_, s_] += rr.crossfire_bonus
+                        reward[e_, mates[cross]] += rr.crossfire_bonus
             self.last_hit_time[ee2, vv2, ss2] = tnow[ee2]
             self.last_hit_bearing[ee2, vv2, ss2] = bearing
+            if role_on:
+                role_s = st.role[ee2, ss2]
+                reward[ee2, ss2] += rr.assault_close_damage * cfg.damage * close * (role_s == 0)
+                reward[ee2, ss2] += rr.flank_damage * cfg.damage * flank * (role_s == 1)
+                # overwatch assist: teammates' damage on an enemy this agent currently sees
+                for e_, s_, v_ in zip(ee2, ss2, vv2):
+                    mates = self.allies[s_]
+                    watching = self.vis[e_, mates, v_] & (st.role[e_, mates] == 2)
+                    reward[e_, mates[watching]] += rr.overwatch_assist_damage * cfg.damage
+        # overwatch spotting: enemies only this agent sees, from range
+        en = self.enemies
+        sees = np.take_along_axis(self.vis, en[None].repeat(E, 0), 2)                    # [E,N,T]
+        team_sees = np.zeros_like(sees)
+        for j in range(T - 1):
+            team_sees |= sees[:, self.allies[:, j]]
+        far = np.linalg.norm(st.pos[:, en] - st.pos[:, :, None], axis=-1) >= rr.overwatch_min_range
+        unique_spot = (sees & ~team_sees & far).sum(-1)
+        self.ep_spot_steps += (unique_spot > 0)
+        if role_on:
+            reward += rr.overwatch_spot * unique_spot * (st.role == 2)
         self.ep_reward += reward
 
         # ---------------------------------------------------------- termination
@@ -441,7 +474,9 @@ class SquadVecEnv:
         stats = np.stack([self.ep_centroid_sum[idx] / steps / cfg.arena_size,
                           self.ep_nearest_enemy_sum[idx] / steps / cfg.arena_size,
                           self.ep_shots[idx] / (cfg.max_steps * cfg.dt / cfg.cooldown),
-                          self.ep_dist[idx] / (cfg.max_speed * cfg.max_steps * cfg.dt)], -1).astype(np.float32)
+                          self.ep_dist[idx] / (cfg.max_speed * cfg.max_steps * cfg.dt),
+                          self.ep_flank_hits[idx] / np.maximum(self.ep_hits_enemy[idx], 1),
+                          self.ep_spot_steps[idx] / steps], -1).astype(np.float32)
         hits_team = np.stack([self.ep_hits_enemy[idx, : self.T].sum(-1), self.ep_hits_enemy[idx, self.T:].sum(-1)], -1)
         return {
             "idx": idx, "winner": winner, "length": self.t[idx].copy(), "agent_stats": stats,
@@ -453,6 +488,8 @@ class SquadVecEnv:
             "coverage_entropy": self.ep_cov_ent_sum[idx] / np.maximum(self.ep_cov_steps[idx], 1),
             "crossfire_rate": self.ep_crossfire[idx] / np.maximum(hits_team, 1),
             "first_contact": self.ep_first_contact[idx].copy(), "return": self.ep_reward[idx].copy(),
+            "flank_hits": self.ep_flank_hits[idx].copy(), "spot_steps": self.ep_spot_steps[idx].copy(),
+            "close_damage": self.ep_close_damage[idx].copy(),
             "engage_angles": [list(self.ep_engage_angles[e]) for e in idx], "alive": self.state.alive[idx].copy(),
         }
 

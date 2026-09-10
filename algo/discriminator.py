@@ -10,9 +10,10 @@ import torch.nn.functional as F
 
 
 class RoleDiscriminator(nn.Module):
-    STAT_NAMES = ["dist_to_centroid", "dist_to_nearest_enemy", "shots_fired", "distance_travelled"]
+    STAT_NAMES = ["dist_to_centroid", "dist_to_nearest_enemy", "shots_fired", "distance_travelled",
+                  "flank_fraction", "spotting_fraction"]
 
-    def __init__(self, num_roles: int, stat_dim: int = 4, hidden: int = 64, lr: float = 1e-3,
+    def __init__(self, num_roles: int, stat_dim: int = 6, hidden: int = 64, lr: float = 1e-3,
                  buffer_size: int = 4096, beta: float = 0.05):
         super().__init__()
         self.num_roles, self.beta = num_roles, beta

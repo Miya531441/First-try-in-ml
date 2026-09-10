@@ -1,5 +1,6 @@
-# Spec v2 baseline: 3v3-ish self-play (mixed squad sizes), shared recurrent policy with an
-# entity-token encoder, full team blackboard, no role conditioning.
+# Spec v2 baseline: squads spawn in opposite corners; mostly 3v3 with some smaller squads;
+# shared recurrent policy with an entity-token encoder, full team blackboard, role
+# conditioning with a diversity bonus and role-specific / team-work incentives.
 seed: 0
 
 env:
@@ -8,7 +9,7 @@ env:
   max_steps: 1200
   team_size: 3                       # slots per team
   team_sizes: [[3, 3], [2, 2], [3, 2], [2, 3]]
-  team_size_probs: [0.4, 0.2, 0.2, 0.2]
+  team_size_probs: [0.7, 0.1, 0.1, 0.1]
   # obstacles by coverage fraction (curriculum raises the upper bound 6% -> 18%, see train)
   coverage_min: 0.12
   coverage_max: 0.18
@@ -18,7 +19,9 @@ env:
   obstacle_min_gap: 4.0
   spawn_clearance: 3.0
   max_obstacles: 32
-  spawn_distance: 30.0
+  spawn_mode: corners                # corners (opposite diagonal corners, ~49 m apart) | lanes
+  corner_margin: 6.0
+  spawn_distance: 30.0               # lanes mode only
   spawn_lateral_jitter: 4.0
   spawn_zone_radius: 4.0
   # body & motion
@@ -74,10 +77,20 @@ model:
   init_log_std: -1.0
 
 roles:
-  enabled: false
+  enabled: true
+  rewards:                           # role-specific and team-work incentives (env.role_rewards)
+    enabled: true
+    assault_close_damage: 0.005      # per hp dealt from <= assault_close_range
+    assault_close_range: 10.0
+    flank_damage: 0.01               # per hp dealt from the victim's rear half
+    flank_angle_deg: 90.0
+    overwatch_spot: 0.002            # per step per enemy only this agent sees, from >= overwatch_min_range
+    overwatch_min_range: 12.0
+    overwatch_assist_damage: 0.005   # per hp teammates deal to an enemy this agent watches
+    crossfire_bonus: 0.1             # to both shooters of a crossfire hit, any role
 
 diversity:
-  enabled: false
+  enabled: true
   beta: 0.05
 
 hierarchical:

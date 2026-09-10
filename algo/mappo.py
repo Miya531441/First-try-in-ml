@@ -27,7 +27,10 @@ def build_env_config(cfg: dict) -> EnvConfig:
     ec = dict(cfg["env"])
     hier = cfg.get("hierarchical", {}) or {}
     ec["plan_tokens"] = int(hier.get("plan_tokens", 4)) if hier.get("enabled", False) else 0
-    ec["roles_enabled"] = bool(cfg.get("roles", {}).get("enabled", True))
+    roles = cfg.get("roles", {}) or {}
+    ec["roles_enabled"] = bool(roles.get("enabled", True))
+    if "rewards" in roles:
+        ec["role_rewards"] = dict(roles["rewards"])
     return EnvConfig.from_dict(ec)
 
 
@@ -99,7 +102,7 @@ class MAPPOTrainer:
             b.reset(np.arange(self.E))
 
         dc = cfg.get("diversity", {})
-        self.disc = RoleDiscriminator(self.env_cfg.num_roles, beta=float(dc.get("beta", 0.05))) \
+        self.disc = RoleDiscriminator(self.env_cfg.num_roles, stat_dim=6, beta=float(dc.get("beta", 0.05))) \
             if dc.get("enabled", False) and self.env_cfg.roles_enabled else None
         hc = cfg.get("hierarchical", {}) or {}
         self.hier = bool(hc.get("enabled", False))
@@ -281,7 +284,9 @@ class MAPPOTrainer:
                "squad": f"{int(ep['active'][k, :T].sum())}v{int(ep['active'][k, T:].sum())}",
                "roles": ep["roles"][k, :T].copy(), "agent_stats": ep["agent_stats"][k, :T].copy(),
                "shots": ep["shots"][k, :T].copy(), "hits_enemy": ep["hits_enemy"][k, :T].copy(),
-               "hits_ally": ep["hits_ally"][k, :T].copy(), "engage": ep["engage_angles"][k]}
+               "hits_ally": ep["hits_ally"][k, :T].copy(), "engage": ep["engage_angles"][k],
+               "flank_hits": ep["flank_hits"][k, :T].copy(), "spot_steps": ep["spot_steps"][k, :T].copy(),
+               "active": ep["active"][k, :T].copy()}
         self.recent.append(rec)
         kind = "self" if opp == LATEST else ("bot" if opp.startswith("bot:") else "pool")
         stats[f"win_rate/{kind}"].append(rec["win"])
@@ -304,9 +309,12 @@ class MAPPOTrainer:
             stats["behaviour/engage_angle_mean_deg"].append(float(np.mean(rec["engage"])))
             stats["behaviour/flank_fraction"].append(float(np.mean(np.array(rec["engage"]) > 90.0)))
         if self.env_cfg.roles_enabled:
-            for r, st in zip(rec["roles"], rec["agent_stats"]):
+            for i, (r, st) in enumerate(zip(rec["roles"], rec["agent_stats"])):
+                if not rec["active"][i]:
+                    continue
                 for name, v in zip(RoleDiscriminator.STAT_NAMES, st):
                     stats[f"roles/{name}/role{int(r)}"].append(float(v))
+                stats[f"roles/accuracy/role{int(r)}"].append(rec["hits_enemy"][i] / max(rec["shots"][i], 1))
 
     # --------------------------------------------------------------- update
     def update(self) -> Dict[str, float]:

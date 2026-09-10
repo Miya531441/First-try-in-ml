@@ -92,7 +92,18 @@ def generate_obstacles(rng: np.random.Generator, cfg, spawn_center: np.ndarray, 
 
 
 def sample_spawn_center(rng: np.random.Generator, cfg) -> np.ndarray:
+    """Team A's spawn centre; team B is always the point mirror (S - centre).
+
+    corners: a random diagonal corner, ``corner_margin`` from the walls, so the squads
+    start in opposite corners ~S*sqrt(2) apart.  lanes: the v1 behaviour, ``spawn_distance``
+    apart across the centre line."""
     S = cfg.arena_size
+    if cfg.spawn_mode == "corners":
+        m = cfg.corner_margin
+        j = cfg.spawn_lateral_jitter * 0.5
+        x = m + rng.uniform(0.0, j)
+        y = (m + rng.uniform(0.0, j)) if rng.random() < 0.5 else (S - m - rng.uniform(0.0, j))
+        return np.array([x, y], np.float32)
     x = S / 2.0 - cfg.spawn_distance / 2.0
     y = rng.uniform(S / 2.0 - cfg.spawn_lateral_jitter, S / 2.0 + cfg.spawn_lateral_jitter)
     return np.array([x, y], np.float32)

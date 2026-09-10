@@ -311,6 +311,13 @@ def test_mirrored_layout_and_spawns():
             assert (np.abs(b - m).sum(-1) < 1e-3).any()
         pa, pb = env.state.pos[e, :3], env.state.pos[e, 3:]
         assert np.allclose(S - pa, pb)
+        # corners mode: opposite diagonal corners, far apart
+        ca, cb = pa.mean(0), pb.mean(0)
+        assert np.linalg.norm(ca - cb) > 0.9 * S
+        assert (ca < 12).all() or (ca[0] < 12 and ca[1] > S - 12)
+    env = SquadVecEnv(EnvConfig(spawn_mode="lanes"), 2, seed=5)
+    for e in range(2):
+        pa, pb = env.state.pos[e, :3], env.state.pos[e, 3:]
         assert cfg.spawn_distance - 2 < np.linalg.norm(pa.mean(0) - pb.mean(0)) < cfg.spawn_distance + 6
 
 
@@ -318,3 +325,45 @@ def test_pettingzoo_api():
     from pettingzoo.test import parallel_api_test
     parallel_api_test(SquadParallelEnv(EnvConfig(max_steps=200), seed=0), num_cycles=300)
     parallel_api_test(SquadParallelEnv(EnvConfig(max_steps=200), action_mode="discrete", seed=0), num_cycles=300)
+
+
+def test_role_rewards():
+    cfg = _cfg(na=3, nb=1, team_size=3, spread_rest_deg=0.0, spread_max_deg=0.0)
+    rr = cfg.role_rewards
+    env = SquadVecEnv(cfg, 1, seed=1)
+    st = env.state
+    # slot roles: 0 assault, 1 flanker, 2 overwatch; enemy 3 at (30,20) facing +x (away from the squad)
+    st.role[0, :3] = [0, 1, 2]
+    _place(env, np.array([[22.0, 20.0], [28.0, 10.0], [10.0, 24.0], [30.0, 20.0], [45.0, 45.0], [45.0, 46.0]]),
+           np.array([0.0, np.arctan2(10.0, 2.0), 0.0, 0.0, 0.0, 0.0]))
+    a = np.zeros((1, 6, 4), np.float32)
+    a[0, 0, 3] = 1.0                                   # assault shoots from 8 m, from behind (angle 180)
+    _, _, rew, _, info = env.step(a)
+    assert info["hit_enemy"][0, 0]
+    base = cfg.reward.damage_dealt * 34 + cfg.reward.step
+    assert rew[0, 0] == pytest.approx(base + rr.assault_close_damage * 34, abs=1e-5)      # close bonus, no flank bonus (assault)
+    # overwatch (agent 2, 20 m away, sees the enemy) gets the assist bonus and the unique-spot bonus
+    assert env.vis[0, 2, 3]
+    assert rew[0, 2] >= rr.overwatch_assist_damage * 34 + cfg.reward.step - 1e-6
+    # flanker hits from the side/behind at 10 m: flank bonus, no close bonus
+    for _ in range(8):
+        env.step(np.zeros((1, 6, 4), np.float32))
+    a = np.zeros((1, 6, 4), np.float32)
+    a[0, 1, 3] = 1.0
+    _, _, rew, _, info = env.step(a)
+    assert info["hit_enemy"][0, 1] and info["engage_angle"][0, 1] > rr.flank_angle_deg
+    assert rew[0, 1] == pytest.approx(base + rr.flank_damage * 34, abs=1e-5)
+    # crossfire: agents 0 and 1 hit the same target within 2 s from bearings 90 deg apart
+    ep = env._episode_summary(np.array([0]), np.array([-1]))
+    assert ep["crossfire_rate"][0, 0] > 0
+    # disabling role rewards removes the extras
+    cfg2 = _cfg(na=3, nb=1, team_size=3, spread_rest_deg=0.0, spread_max_deg=0.0)
+    cfg2.role_rewards.enabled = False
+    env2 = SquadVecEnv(cfg2, 1, seed=1)
+    env2.state.role[0, :3] = [0, 1, 2]
+    _place(env2, np.array([[22.0, 20.0], [28.0, 10.0], [10.0, 24.0], [30.0, 20.0], [45.0, 45.0], [45.0, 46.0]]),
+           np.array([0.0, np.arctan2(10.0, 2.0), 0.0, 0.0, 0.0, 0.0]))
+    a = np.zeros((1, 6, 4), np.float32)
+    a[0, 0, 3] = 1.0
+    _, _, rew, _, _ = env2.step(a)
+    assert rew[0, 0] == pytest.approx(base, abs=1e-6)

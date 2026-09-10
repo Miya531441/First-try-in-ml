@@ -1,7 +1,10 @@
 # Squad combat with cone-limited vision (self-play MARL, spec v2)
 
 Squads of 2-3 agents learn, purely through self-play, to eliminate an enemy squad in a
-48 x 48 m arena with mirrored cover (full walls and low crates).  Every agent only perceives
+48 x 48 m arena with mirrored cover (full walls and low crates), starting from opposite
+corners.  Each squad member is assigned a role (assault, flanker, overwatch) with its own
+small incentive, a diversity bonus keeps the roles behaviourally distinct, and a
+crossfire bonus rewards coordinated fire.  Every agent only perceives
 the world through a 60 degree, 24 m vision cone plus a shared team blackboard (ally slots,
 persistent enemy tracks with staleness/confidence) and a 64-ray static map scan, so the
 task is a hard POMDP and coordination (splitting, flanking, crossfire, covering angles)
@@ -49,9 +52,9 @@ python -m pytest tests -q
 |---|------|---------|
 | 1 | Env + renderer + bots | `python -m pytest tests`; `python scripts/render.py --checkpoint <ckpt> --opponent charger --gif out.gif` |
 | 2 | 1v1 vs scripted bots, no roles | `python scripts/train.py --config configs/1v1_scripted.yaml` |
-| 3 | 3v3 self-play, shared policy | `python scripts/train.py --config configs/base.yaml` |
-| 4 | Roles + diversity bonus | `python scripts/train.py --config configs/roles.yaml` |
-| 5 | League + ablations | `configs/ablations/{comms_full,comms_contacts_only,comms_none,framestack,per_slot,no_friendly_fire,discrete,conv_mlp_encoder,no_mirror_no_aux}.yaml` |
+| 3 | Self-play without roles (ablation) | `python scripts/train.py --config configs/no_roles.yaml` |
+| 4 | Roles + diversity bonus + role rewards (default) | `python scripts/train.py --config configs/base.yaml` |
+| 5 | League + ablations | `configs/ablations/{comms_full,comms_contacts_only,comms_none,no_role_rewards,lane_spawns,framestack,per_slot,no_friendly_fire,discrete,conv_mlp_encoder,no_mirror_no_aux}.yaml` |
 | 6 | Hierarchical commander | `python scripts/train.py --config configs/hierarchical.yaml` |
 
 Any config key can be overridden on the command line:
@@ -97,8 +100,11 @@ Logs go to tensorboard under `runs/<name>`: `tensorboard --logdir runs`.
   squad's cone coverage over 12 sectors, 1 = evenly spread), `win_rate/squad_<AvB>`.
 * `loss/aux_enemy_pos` - auxiliary enemy-position prediction error (drops as the
   recurrent state learns to track enemies).
-* `roles/<stat>/role<k>` - per-role behavioural statistics; `disc/accuracy` - how
-  identifiable the roles are from behaviour (role collapse shows up as ~1/3).
+* `roles/<stat>/role<k>` - per-role behavioural statistics (distance to squad, distance to
+  enemy, shots, distance travelled, flank fraction, unique spotting, accuracy);
+  `disc/accuracy` - how identifiable the roles are from behaviour (role collapse shows up
+  as ~1/3).  `scripts/eval.py` prints the same per-role table, and the trace images label
+  every agent with its role letter (A/F/O).
 
 ## Throughput
 
