@@ -1,9 +1,11 @@
-# 3v3 squad combat with cone-limited vision (self-play MARL)
+# Squad combat with cone-limited vision (self-play MARL, spec v2)
 
-A squad of 3 agents learns, purely through self-play, to eliminate an enemy squad of 3
-identical agents in a 64 x 64 m arena with mirrored cover.  Every agent only perceives the
-world through a 60 degree, 30 m vision cone, so the task is a hard POMDP and coordination
-(splitting, flanking, covering angles) is the skill to be learned.
+Squads of 2-3 agents learn, purely through self-play, to eliminate an enemy squad in a
+48 x 48 m arena with mirrored cover (full walls and low crates).  Every agent only perceives
+the world through a 60 degree, 24 m vision cone plus a shared team blackboard (ally slots,
+persistent enemy tracks with staleness/confidence) and a 64-ray static map scan, so the
+task is a hard POMDP and coordination (splitting, flanking, crossfire, covering angles)
+is the skill to be learned.
 
 See `DESIGN.md` for assumptions, spec issues and the reasoning behind each component.
 
@@ -17,14 +19,20 @@ configs/  base.yaml  roles.yaml  hierarchical.yaml  1v1_scripted.yaml  ablations
 tests/    test_env.py  test_algo.py
 ```
 
-* `env/squad_env.py` - `SquadVecEnv` (batched numpy simulation of N arenas, auto-reset)
-  and `SquadParallelEnv` (PettingZoo `ParallelEnv`, passes `parallel_api_test`).
+* `env/squad_env.py` - `SquadVecEnv` (batched numpy simulation of N arenas, auto-reset,
+  squad sizes sampled per episode from {3v3, 2v2, 3v2, 2v3}, team blackboard) and
+  `SquadParallelEnv` (PettingZoo `ParallelEnv`, passes `parallel_api_test`).
+* `env/spawn.py` - coverage-parameterised layouts (12-18% of the arena), two obstacle
+  classes, 4 m minimum gaps, 3 m spawn clearance, flood-fill connectivity check.
 * `env/raycast.py` - batched ray/box, ray/circle, boundary and segment-occlusion tests.
   All rays of all agents of all envs are cast against all obstacles at once.
 * `env/bots.py` - scripted baselines: random, spinner, charger, holder.
+* `algo/networks.py` - entity-token encoder (per-type MLPs -> 2-layer transformer) -> GRU
+  -> action heads + auxiliary enemy-position head; `algo/augment.py` - mirror augmentation.
 * `algo/mappo.py` - MAPPO trainer (centralised critic on the mirrored global state,
-  recurrent actor with chunked BPTT, self-play league, role diversity bonus,
-  optional hierarchical commander, tensorboard logging, periodic GIF rollouts).
+  recurrent actor with chunked BPTT, self-play league, role diversity bonus, auxiliary
+  loss, mirror augmentation, obstacle-coverage curriculum, optional hierarchical
+  commander, tensorboard logging, periodic GIF rollouts).
 * `scripts/render.py` - pygame renderer: cones with occlusion, firing rays, hit markers,
   HUD; replays `.npz` episodes saved by training/eval.
 
@@ -43,7 +51,7 @@ python -m pytest tests -q
 | 2 | 1v1 vs scripted bots, no roles | `python scripts/train.py --config configs/1v1_scripted.yaml` |
 | 3 | 3v3 self-play, shared policy | `python scripts/train.py --config configs/base.yaml` |
 | 4 | Roles + diversity bonus | `python scripts/train.py --config configs/roles.yaml` |
-| 5 | League + ablations | `configs/ablations/{framestack,per_slot,no_friendly_fire,no_shaping,discrete}.yaml` |
+| 5 | League + ablations | `configs/ablations/{comms_full,comms_contacts_only,comms_none,framestack,per_slot,no_friendly_fire,discrete,conv_mlp_encoder,no_mirror_no_aux}.yaml` |
 | 6 | Hierarchical commander | `python scripts/train.py --config configs/hierarchical.yaml` |
 
 Any config key can be overridden on the command line:
@@ -84,14 +92,19 @@ Logs go to tensorboard under `runs/<name>`: `tensorboard --logdir runs`.
 * `win_rate/self|pool|bot`, `win_rate/vs_<opponent>`.
 * `behaviour/pair_distance` (teammate spread), `time_to_first_contact_s`, `accuracy`,
   `friendly_fire_rate`, `engage_angle_mean_deg`, `flank_fraction` (hits from behind the
-  victim's 90 degree line).
+  victim's 90 degree line), `crossfire_rate` (enemy hits where a teammate hit the same
+  target within 2 s from a bearing >= 45 degrees apart), `coverage_entropy` (entropy of the
+  squad's cone coverage over 12 sectors, 1 = evenly spread), `win_rate/squad_<AvB>`.
+* `loss/aux_enemy_pos` - auxiliary enemy-position prediction error (drops as the
+  recurrent state learns to track enemies).
 * `roles/<stat>/role<k>` - per-role behavioural statistics; `disc/accuracy` - how
   identifiable the roles are from behaviour (role collapse shows up as ~1/3).
 
 ## Throughput
 
-The simulation runs at roughly 3.5k env-steps/s for 128 envs on one CPU core-set; the full
-training loop (rollout + PPO update, CPU only, 4 cores) runs at ~700 env-steps/s, so the
-default 3000-update schedule (~100M steps) is a multi-day CPU run.  A GPU for the update
-phase and more cores for the rollout are the obvious levers; `train.torch_threads`
-controls the CPU thread count.
+The simulation runs at ~1.5k env-steps/s for 128 envs on CPU (vision rays, LOS and the
+64-ray map scan are all batched numpy).  The transformer encoder makes the PPO update the
+bottleneck on CPU: the full loop runs at ~120 env-steps/s on 4 cores, so the default
+3000-update schedule (~100M steps) needs a GPU.  For CPU experiments use
+`model.encoder=conv_mlp`, `train.epochs=2` and fewer envs; `train.torch_threads` controls
+the CPU thread count.

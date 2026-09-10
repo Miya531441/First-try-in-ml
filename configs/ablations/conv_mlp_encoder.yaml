@@ -1,0 +1,3 @@
+inherit: ../roles.yaml
+model:
+  encoder: conv_mlp

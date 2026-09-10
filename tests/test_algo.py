@@ -6,7 +6,18 @@ import torch
 from algo.buffer import RolloutBuffer
 from algo.discriminator import RoleDiscriminator
 from algo.league import LATEST, League
+from algo.augment import mirror_action, mirror_aux, mirror_obs
 from algo.networks import ActorCritic
+from env.agent import EnvConfig
+from env.squad_env import SquadVecEnv
+
+
+def _env():
+    return SquadVecEnv(EnvConfig(), 2, seed=0)
+
+
+def _ac(env, **kw):
+    return ActorCritic(env.obs_layout, env.obs_dim, env.gs_dim, env.T, **kw)
 
 
 def test_gae_matches_reference():
@@ -39,8 +50,9 @@ def test_gae_matches_reference():
 
 def test_sequence_evaluate_matches_act_with_resets():
     torch.manual_seed(0)
-    obs_dim, gs_dim, R, T = 5 * 32 + 20, 30, 32, 3
-    ac = ActorCritic(obs_dim, gs_dim, R, T, hidden=32)
+    env = _env()
+    obs_dim, gs_dim, T = env.obs_dim, env.gs_dim, env.T
+    ac = _ac(env, hidden=32, d_model=32)
     L, B = 6, 4
     obs = torch.randn(L, B, obs_dim)
     gs = torch.randn(L, B, gs_dim)
@@ -56,10 +68,11 @@ def test_sequence_evaluate_matches_act_with_resets():
         logps.append(lp)
         vals.append(v)
     acts, logps, vals = torch.stack(acts), torch.stack(logps), torch.stack(vals)
-    lp2, ent, v2, hs = ac.evaluate(obs, gs, ac.initial_hidden(B), first, acts, slot)
+    lp2, ent, v2, hs, aux = ac.evaluate(obs, obs, gs, ac.initial_hidden(B), first, acts, slot)
     assert torch.allclose(lp2, logps, atol=1e-5)
     assert torch.allclose(v2, vals, atol=1e-5)
     assert torch.allclose(hs[3, 1], torch.zeros(32))          # reset applied before step 3
+    assert aux.shape == (L, B, T, 2)
 
 
 def test_minibatch_layout_keeps_teams_together():
@@ -88,7 +101,7 @@ def test_league_sampling_and_elo(tmp_path):
     names = [lg.sample_opponent(rng) for _ in range(2000)]
     frac_latest = np.mean([n == LATEST for n in names])
     assert 0.62 < frac_latest < 0.78
-    ac = ActorCritic(5 * 32 + 20, 30, 32, 3, hidden=8)
+    ac = _ac(_env(), hidden=8, d_model=8, n_heads=2)
     snap = lg.add_snapshot(ac, 1)
     for _ in range(20):
         lg.record(snap, 1.0)
@@ -114,3 +127,28 @@ def test_discriminator_bonus_is_zero_centred_then_learns():
     out = d.train_steps(steps=300, rng=rng)
     assert out["disc/accuracy"] > 0.8
     assert d.bonus(np.array([[2.0, 0, 0, 0]], np.float32), np.array([2]))[0] > 0.02
+
+
+def test_mirror_augmentation_is_an_involution_and_consistent():
+    env = _env()
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        env.step(rng.uniform(-1, 1, size=(2, 6, 4)).astype(np.float32))
+    obs = torch.as_tensor(env._build_obs()).view(-1, env.obs_dim)
+    m = mirror_obs(obs, env.obs_layout, env.obs_dim)
+    assert torch.allclose(mirror_obs(m, env.obs_layout, env.obs_dim), obs)
+    assert not torch.allclose(m, obs)
+    lay = env.obs_layout["vision"]
+    v = obs[:, lay["start"]: lay["start"] + lay["size"]].view(-1, 32, 5)
+    mv = m[:, lay["start"]: lay["start"] + lay["size"]].view(-1, 32, 5)
+    assert torch.equal(mv, v.flip(1))
+    a = torch.tensor([[0.3, 0.5, -0.7, 1.0]])
+    assert torch.equal(mirror_action(mirror_action(a, "hybrid"), "hybrid"), a)
+    d = torch.tensor([[2.0, 0.0, 6.0, 1.0]])
+    assert torch.equal(mirror_action(d, "discrete"), torch.tensor([[2.0, 2.0, 0.0, 1.0]]))
+    aux = torch.as_tensor(env.aux_targets())
+    assert torch.allclose(mirror_aux(mirror_aux(aux)), aux)
+    # a mirrored world gives the mirrored policy input: stacked frames are mirrored frame-wise
+    stacked = torch.cat([obs, obs], -1)
+    ms = mirror_obs(stacked, env.obs_layout, env.obs_dim)
+    assert torch.allclose(ms[:, : env.obs_dim], m) and torch.allclose(ms[:, env.obs_dim:], m)

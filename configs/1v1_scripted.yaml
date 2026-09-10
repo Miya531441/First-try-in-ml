@@ -1,7 +1,9 @@
-# Milestone 2: 1v1 against scripted bots, PPO with the same machinery, no roles.
+# Milestone 2: 1v1 against scripted bots, no roles, hp tiebreak on timeout.
 inherit: base.yaml
 env:
   team_size: 1
+  team_sizes: [[1, 1]]
+  team_size_probs: [1.0]
   timeout_hp_tiebreak: true
 league:
   scripted: [random, spinner, charger, holder]

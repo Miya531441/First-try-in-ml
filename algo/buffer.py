@@ -9,7 +9,7 @@ import torch
 
 class RolloutBuffer:
     def __init__(self, T: int, E: int, N: int, obs_dim: int, gs_dim: int, hidden: int, chunk_len: int,
-                 gamma: float, lam: float, plan_tokens: int = 0):
+                 gamma: float, lam: float, plan_tokens: int = 0, aux_shape=(3, 3)):
         assert T % chunk_len == 0, "rollout_len must be a multiple of chunk_len"
         self.T, self.E, self.N, self.L = T, E, N, chunk_len
         self.C = T // chunk_len
@@ -25,6 +25,7 @@ class RolloutBuffer:
         self.alive = torch.zeros(T, E, N)            # agent alive when acting
         self.learner = torch.zeros(T, E, N)          # counts toward the loss
         self.h0 = torch.zeros(self.C, E, N, hidden)  # hidden state at chunk starts
+        self.aux = torch.zeros(T, E, N, *aux_shape)   # true enemy positions (train-time only)
         self.plan_tokens = plan_tokens
         if plan_tokens:
             self.plan_action = torch.zeros(T, E, 2, dtype=torch.long)
@@ -34,9 +35,11 @@ class RolloutBuffer:
         self.returns = torch.zeros(T, E, N)
         self.step = 0
 
-    def add(self, obs, gs, action, logp, value, first, alive, learner, h):
+    def add(self, obs, gs, action, logp, value, first, alive, learner, h, aux=None):
         t = self.step
         self.obs[t], self.gs[t], self.actions[t] = obs, gs, action
+        if aux is not None:
+            self.aux[t] = aux
         self.logp[t], self.values[t] = logp, value
         self.first[t], self.alive[t], self.learner[t] = first, alive, learner
         if t % self.L == 0:
@@ -89,7 +92,7 @@ class RolloutBuffer:
             batch = {
                 "obs": seq(self.obs), "gs": seq(self.gs), "actions": seq(self.actions),
                 "logp": seq(self.logp), "values": seq(self.values), "adv": seq(self.advantages),
-                "returns": seq(self.returns), "alive": seq(self.alive), "learner": seq(self.learner),
+                "returns": seq(self.returns), "alive": seq(self.alive), "learner": seq(self.learner), "aux": seq(self.aux),
                 "first": first_env.repeat_interleave(N, dim=1), "h0": self.h0[cc, ee, n],
                 "slot": n % (N // 2), "num_pairs": P,
             }

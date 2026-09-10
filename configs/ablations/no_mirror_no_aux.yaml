@@ -1,0 +1,4 @@
+inherit: ../roles.yaml
+train:
+  mirror_aug: 0.0
+  aux_coef: 0.0

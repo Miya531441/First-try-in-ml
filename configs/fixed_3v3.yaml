@@ -1,0 +1,5 @@
+# Pure 3v3 (no squad-size sampling), otherwise the base setup.
+inherit: base.yaml
+env:
+  team_sizes: [[3, 3]]
+  team_size_probs: [1.0]

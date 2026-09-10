@@ -1,0 +1,4 @@
+# Comms ablation: team blackboard = full
+inherit: ../roles.yaml
+env:
+  comms: full

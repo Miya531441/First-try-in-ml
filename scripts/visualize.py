@@ -107,7 +107,8 @@ def rollout(cfg: dict, policy, opponent: str, seed: int, max_steps: int, frame_s
             break
     rend.close()
     return {"imgs": imgs, "times": times, "frames": frames, "events": events, "winner": winner, "length": length,
-            "dt": ec.dt, "boxes": frames[0]["boxes"], "team": frames[0]["team"], "arena": ec.arena_size}
+            "dt": ec.dt, "boxes": frames[0]["boxes"], "box_kind": frames[0]["box_kind"], "team": frames[0]["team"],
+            "arena": ec.arena_size}
 
 
 # ---------------------------------------------------------------- compositions
@@ -172,8 +173,9 @@ def trace_image(r: Dict, px: float = 8.0) -> Image.Image:
     def P(p):
         return (p[0] * px, S - p[1] * px)
 
-    for b in r["boxes"]:
-        d.rectangle([P((b[0], b[3])), P((b[2], b[1]))], fill=(110, 110, 118))
+    kinds = r.get("box_kind", np.zeros(len(r["boxes"]), int))
+    for b, kind in zip(r["boxes"], kinds):
+        d.rectangle([P((b[0], b[3])), P((b[2], b[1]))], fill=(110, 110, 118) if kind == 0 else (96, 74, 48))
     frames = r["frames"]
     N = len(r["team"])
     for i in range(N):

@@ -56,7 +56,8 @@ def run_matches(cfg: dict, policy, opponent: str, episodes: int, num_envs: int =
         r.reset(np.arange(num_envs), obs)
     T = env.T
     res = {"win": [], "loss": [], "draw": [], "length": [], "pair_dist": [], "first_contact": [], "shots": 0,
-           "hits_enemy": 0, "hits_ally": 0, "engage": [], "damage_dealt": [], "damage_taken": []}
+           "hits_enemy": 0, "hits_ally": 0, "engage": [], "damage_dealt": [], "damage_taken": [],
+           "coverage_entropy": [], "crossfire": []}
     n = 0
     while n < episodes:
         a = np.zeros((num_envs, env.N, 4), np.float32)
@@ -77,6 +78,9 @@ def run_matches(cfg: dict, policy, opponent: str, episodes: int, num_envs: int =
                 res["draw"].append(w < 0)
                 res["length"].append(int(ep["length"][k]))
                 res["pair_dist"].append(float(ep["pair_dist"][k, 0]))
+                res["coverage_entropy"].append(float(ep["coverage_entropy"][k, 0]))
+                if ep["hits_enemy"][k, :T].sum() > 0:
+                    res["crossfire"].append(float(ep["crossfire_rate"][k, 0]))
                 if ep["first_contact"][k] >= 0:
                     res["first_contact"].append(ep["first_contact"][k] * ec.dt)
                 res["shots"] += float(ep["shots"][k, :T].sum())
@@ -96,6 +100,8 @@ def run_matches(cfg: dict, policy, opponent: str, episodes: int, num_envs: int =
         "win_rate": float(np.mean(res["win"])), "loss_rate": float(np.mean(res["loss"])), "draw_rate": float(np.mean(res["draw"])),
         "mean_length_s": float(np.mean(res["length"]) * ec.dt),
         "teammate_pair_distance_m": float(np.mean(res["pair_dist"])),
+        "angular_coverage_entropy": float(np.mean(res["coverage_entropy"])),
+        "crossfire_rate": float(np.mean(res["crossfire"])) if res["crossfire"] else float("nan"),
         "time_to_first_contact_s": float(np.mean(res["first_contact"])) if res["first_contact"] else float("nan"),
         "contact_rate": len(res["first_contact"]) / max(n, 1),
         "shot_accuracy": res["hits_enemy"] / max(res["shots"], 1),
@@ -146,12 +152,12 @@ def main():
         results.append(r)
         print(json.dumps(r, indent=1))
     summary = {"checkpoint": args.checkpoint, "latest_elo": elo.get("latest"), "results": results}
-    print("\n| opponent | win | draw | loss | acc | ff | pair dist | 1st contact | flank>90 |")
-    print("|---|---|---|---|---|---|---|---|---|")
+    print("\n| opponent | win | draw | loss | acc | ff | pair dist | 1st contact | flank>90 | crossfire | cov. entropy |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|")
     for r in results:
         print(f"| {r['opponent']} | {r['win_rate']:.2f} | {r['draw_rate']:.2f} | {r['loss_rate']:.2f} | {r['shot_accuracy']:.2f} | "
               f"{r['friendly_fire_rate']:.3f} | {r['teammate_pair_distance_m']:.1f} m | {r['time_to_first_contact_s']:.1f} s | "
-              f"{r['flank_fraction(>90deg)']:.2f} |")
+              f"{r['flank_fraction(>90deg)']:.2f} | {r['crossfire_rate']:.2f} | {r['angular_coverage_entropy']:.2f} |")
     if args.out:
         with open(args.out, "w") as f:
             json.dump(summary, f, indent=1)

@@ -1,8 +1,8 @@
-"""Environment configuration and batched agent state."""
+"""Environment configuration and batched agent state (spec v2)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -19,29 +19,44 @@ class RewardConfig:
     kill_split: bool = False          # split the kill bonus equally among contributors
     death: float = -0.5
     step: float = -0.0005
-    shaping_los: float = 0.001        # per step with an enemy in cone + clear LOS (annealed)
 
 
 @dataclass
 class EnvConfig:
-    arena_size: float = 64.0
+    # world
+    arena_size: float = 48.0
     dt: float = 0.05
     max_steps: int = 1200
-    team_size: int = 3
-    num_obstacles_min: int = 8
-    num_obstacles_max: int = 16
+    team_size: int = 3                                   # slots per team (max squad size)
+    team_sizes: List[List[int]] = field(default_factory=lambda: [[3, 3], [2, 2], [3, 2], [2, 3]])
+    team_size_probs: List[float] = field(default_factory=lambda: [0.4, 0.2, 0.2, 0.2])
+    # obstacles: parameterised by coverage fraction of the arena area
+    coverage_min: float = 0.12
+    coverage_max: float = 0.18
+    crate_fraction: float = 0.4                           # share of obstacles that are low crates
     obstacle_size_min: float = 2.0
-    obstacle_size_max: float = 10.0
-    spawn_distance: float = 40.0
-    spawn_lateral_jitter: float = 6.0
-    spawn_zone_radius: float = 5.0
-    collision_radius: float = 0.4
-    max_speed: float = 4.0
-    max_turn_rate_deg: float = 180.0
-    vel_tau: float = 0.1              # first-order velocity lag (s)
+    obstacle_size_max: float = 8.0
+    obstacle_min_gap: float = 4.0
+    spawn_clearance: float = 3.0
+    max_obstacles: int = 32
+    # spawns
+    spawn_distance: float = 30.0
+    spawn_lateral_jitter: float = 4.0
+    spawn_zone_radius: float = 4.0
+    # body & motion
+    collision_radius: float = 1.0
+    speed_forward: float = 4.0
+    speed_strafe: float = 2.0
+    speed_backward: float = 1.5
+    max_turn_rate_deg: float = 120.0
+    turn_accel_deg: float = 600.0
+    vel_tau: float = 0.1
+    # sensing
     vision_fov_deg: float = 60.0
-    vision_range: float = 30.0
+    vision_range: float = 24.0
     num_rays: int = 32
+    map_rays: int = 64
+    # weapon
     hp: float = 100.0
     damage: float = 34.0
     cooldown: float = 0.4
@@ -51,16 +66,28 @@ class EnvConfig:
     spread_max_deg: float = 2.0
     friendly_fire: bool = True
     timeout_hp_tiebreak: bool = False
+    # team information
+    comms: str = "full"                                   # full | contacts_only | none
+    track_staleness_cap: float = 10.0
+    track_confidence_tau: float = 3.0
+    # observation extras
     include_prev_action: bool = True
     num_roles: int = 3
     roles_enabled: bool = True
-    plan_tokens: int = 0              # >0 enables the commander token slot in observations
-    contact_staleness_cap: float = 10.0
+    plan_tokens: int = 0
     reward: RewardConfig = field(default_factory=RewardConfig)
+
+    @property
+    def max_speed(self) -> float:
+        return self.speed_forward
 
     @property
     def max_turn_rate(self) -> float:
         return np.deg2rad(self.max_turn_rate_deg)
+
+    @property
+    def turn_accel(self) -> float:
+        return np.deg2rad(self.turn_accel_deg)
 
     @property
     def fov(self) -> float:
@@ -70,14 +97,12 @@ class EnvConfig:
     def num_agents(self) -> int:
         return 2 * self.team_size
 
-    @property
-    def max_obstacles(self) -> int:
-        return self.num_obstacles_max + (self.num_obstacles_max % 2)
-
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "EnvConfig":
         d = dict(d or {})
         rw = d.pop("reward", {}) or {}
+        rw.pop("shaping_los", None)           # removed in spec v2
+        d.pop("shaping_los", None)
         return EnvConfig(**d, reward=RewardConfig(**rw))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -88,7 +113,7 @@ class AgentState:
     """Structure-of-arrays state for all agents in all envs: shapes [E, N, ...]."""
 
     def __init__(self, num_envs: int, num_agents: int, cfg: EnvConfig):
-        E, N = num_envs, num_agents
+        E, N, T = num_envs, num_agents, cfg.team_size
         self.cfg = cfg
         self.pos = np.zeros((E, N, 2), np.float32)
         self.theta = np.zeros((E, N), np.float32)
@@ -99,35 +124,39 @@ class AgentState:
         self.cooldown = np.zeros((E, N), np.float32)
         self.reload = np.zeros((E, N), np.float32)
         self.alive = np.ones((E, N), bool)
-        self.team = np.repeat(np.arange(2), cfg.team_size)[None, :].repeat(E, 0)   # [E,N]
+        self.active = np.ones((E, N), bool)               # slot participates in this episode
+        self.team = np.repeat(np.arange(2), T)[None, :].repeat(E, 0)
         self.role = np.zeros((E, N), np.int64)
         self.prev_action = np.zeros((E, N, 4), np.float32)
-        # last known enemy contact per agent: world position, time of sighting, valid flag
-        self.contact_pos = np.zeros((E, N, 2), np.float32)
-        self.contact_time = np.zeros((E, N), np.float32)
-        self.contact_valid = np.zeros((E, N), bool)
+        # per-agent enemy tracks, indexed by enemy slot (persistent id)
+        self.track_pos = np.zeros((E, N, T, 2), np.float32)
+        self.track_vel = np.zeros((E, N, T, 2), np.float32)
+        self.track_theta = np.zeros((E, N, T), np.float32)
+        self.track_hp = np.zeros((E, N, T), np.float32)
+        self.track_time = np.zeros((E, N, T), np.float32)
+        self.track_valid = np.zeros((E, N, T), bool)
 
-    def reset_envs(self, idx: np.ndarray, pos: np.ndarray, theta: np.ndarray, roles: np.ndarray):
+    def reset_envs(self, idx: np.ndarray, pos: np.ndarray, theta: np.ndarray, roles: np.ndarray, active: np.ndarray):
         cfg = self.cfg
         self.pos[idx] = pos
         self.theta[idx] = theta
         self.vel[idx] = 0.0
         self.omega[idx] = 0.0
-        self.hp[idx] = cfg.hp
+        self.active[idx] = active
+        self.alive[idx] = active
+        self.hp[idx] = np.where(active, cfg.hp, 0.0)
         self.ammo[idx] = cfg.magazine
         self.cooldown[idx] = 0.0
         self.reload[idx] = 0.0
-        self.alive[idx] = True
         self.role[idx] = roles
         self.prev_action[idx] = 0.0
-        self.contact_pos[idx] = 0.0
-        self.contact_time[idx] = 0.0
-        self.contact_valid[idx] = False
+        for a in (self.track_pos, self.track_vel, self.track_theta, self.track_hp, self.track_time):
+            a[idx] = 0.0
+        self.track_valid[idx] = False
 
     @property
     def heading_vec(self) -> np.ndarray:
         return np.stack([np.cos(self.theta), np.sin(self.theta)], -1)
 
     def team_mask(self) -> np.ndarray:
-        """[E, N, N] True where agents i and j are on the same team."""
         return self.team[:, :, None] == self.team[:, None, :]

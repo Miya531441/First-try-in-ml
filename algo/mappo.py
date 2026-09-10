@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
+from algo.augment import mirror_action, mirror_aux, mirror_obs
 from algo.buffer import RolloutBuffer
 from algo.discriminator import RoleDiscriminator
 from algo.league import LATEST, League
@@ -33,10 +34,12 @@ def build_env_config(cfg: dict) -> EnvConfig:
 def build_policy(cfg: dict, env: SquadVecEnv) -> ActorCritic:
     mc = cfg["model"]
     stack = int(mc.get("frame_stack", 4)) if mc.get("memory", "gru") == "framestack" else 1
-    return ActorCritic(env.obs_dim, env.gs_dim, env.R, env.T, hidden=int(mc.get("hidden", 256)),
+    return ActorCritic(env.obs_layout, env.obs_dim, env.gs_dim, env.T, hidden=int(mc.get("hidden", 256)),
                        use_gru=mc.get("memory", "gru") == "gru", stack=stack, action_mode=mc.get("action_mode", "hybrid"),
                        num_policies=env.T if mc.get("policy", "shared") == "per_slot" else 1,
-                       plan_tokens=env.cfg.plan_tokens, init_log_std=float(mc.get("init_log_std", -1.0)))
+                       plan_tokens=env.cfg.plan_tokens, init_log_std=float(mc.get("init_log_std", -1.0)),
+                       encoder=mc.get("encoder", "entity"), d_model=int(mc.get("d_model", 128)),
+                       n_layers=int(mc.get("transformer_layers", 2)), n_heads=int(mc.get("transformer_heads", 4)))
 
 
 class FrameStack:
@@ -80,7 +83,7 @@ class MAPPOTrainer:
         self.rollout_len = int(tc["rollout_len"])
         self.buffer = RolloutBuffer(self.rollout_len, self.E, self.N, self.obs_in_dim, self.env.gs_dim, self.H,
                                     int(tc.get("chunk_len", 32)), float(tc["gamma"]), float(tc["gae_lambda"]),
-                                    plan_tokens=self.env_cfg.plan_tokens)
+                                    plan_tokens=self.env_cfg.plan_tokens, aux_shape=self.env.aux_dim)
         self.ret_norm = ReturnNormalizer((self.E, self.N), float(tc["gamma"])) if tc.get("normalize_returns", True) else None
 
         lc = cfg.get("league", {})
@@ -136,7 +139,7 @@ class MAPPOTrainer:
         return self.fs.get() if self.fs else self.obs
 
     def _learner_mask(self) -> np.ndarray:
-        m = np.ones((self.E, self.N), np.float32)
+        m = self.env.state.active.astype(np.float32).copy()
         opp_latest = np.array([o == LATEST for o in self.env_opp])
         m[~opp_latest, self.T:] = 0.0
         return m
@@ -218,7 +221,8 @@ class MAPPOTrainer:
 
             self.buffer.add(torch.as_tensor(obs_in).view(E, N, -1), torch.as_tensor(self.gs), action.view(E, N, 4),
                             logp.view(E, N), value.view(E, N), torch.as_tensor(self.first, dtype=torch.float32),
-                            torch.as_tensor(alive, dtype=torch.float32), torch.as_tensor(learner), self.h)
+                            torch.as_tensor(alive, dtype=torch.float32), torch.as_tensor(learner), self.h,
+                            aux=torch.as_tensor(self.env.aux_targets()))
             if self.hier:
                 tt = self.buffer.step - 1
                 self.buffer.plan_action[tt] = torch.as_tensor(p_act)
@@ -273,6 +277,8 @@ class MAPPOTrainer:
         rec = {"opp": opp, "win": float(w == 0), "loss": float(w == 1), "draw": float(w < 0),
                "length": int(ep["length"][k]), "return": float(ep["return"][k, :T].mean()),
                "first_contact": int(ep["first_contact"][k]), "pair_dist": float(ep["pair_dist"][k, 0]),
+               "coverage_entropy": float(ep["coverage_entropy"][k, 0]), "crossfire_rate": float(ep["crossfire_rate"][k, 0]),
+               "squad": f"{int(ep['active'][k, :T].sum())}v{int(ep['active'][k, T:].sum())}",
                "roles": ep["roles"][k, :T].copy(), "agent_stats": ep["agent_stats"][k, :T].copy(),
                "shots": ep["shots"][k, :T].copy(), "hits_enemy": ep["hits_enemy"][k, :T].copy(),
                "hits_ally": ep["hits_ally"][k, :T].copy(), "engage": ep["engage_angles"][k]}
@@ -288,6 +294,10 @@ class MAPPOTrainer:
         stats["behaviour/friendly_fire_rate"].append(rec["hits_ally"].sum() / max(shots, 1))
         stats["behaviour/shots_per_agent"].append(shots / T)
         stats["behaviour/pair_distance"].append(rec["pair_dist"])
+        stats["behaviour/coverage_entropy"].append(rec["coverage_entropy"])
+        if rec["hits_enemy"].sum() > 0:
+            stats["behaviour/crossfire_rate"].append(rec["crossfire_rate"])
+        stats[f"win_rate/squad_{rec['squad']}"].append(rec["win"])
         if rec["first_contact"] >= 0:
             stats["behaviour/time_to_first_contact_s"].append(rec["first_contact"] * self.env_cfg.dt)
         if rec["engage"]:
@@ -308,11 +318,20 @@ class MAPPOTrainer:
         e0, e1 = float(tc.get("entropy_coef", 0.01)), float(tc.get("entropy_coef_final", 0.001))
         ent_coef = e0 + (e1 - e0) * progress
         clip, vf_coef, max_gn = float(tc["clip"]), float(tc["value_coef"]), float(tc["max_grad_norm"])
+        aux_coef = float(tc.get("aux_coef", 0.1))
+        mirror_p = float(tc.get("mirror_aug", 0.5))
         self.policy.train()
         agg = defaultdict(list)
         for _ in range(int(tc["epochs"])):
             for b in self.buffer.iterate(int(tc["minibatches"]), self.rng):
-                logp, ent, values, hs = self.policy.evaluate(b["obs"], b["gs"], b["h0"], b["first"], b["actions"], b["slot"])
+                obs_a, act_a, aux_t = b["obs"], b["actions"], b["aux"]
+                if mirror_p > 0:
+                    flip = torch.as_tensor(self.rng.random(obs_a.shape[1]) < mirror_p)          # per sequence
+                    f3 = flip[None, :, None]
+                    obs_a = torch.where(f3, mirror_obs(obs_a, self.env.obs_layout, self.env.obs_dim), obs_a)
+                    act_a = torch.where(f3, mirror_action(act_a, self.policy.action_mode), act_a)
+                    aux_t = torch.where(flip[None, :, None, None], mirror_aux(aux_t), aux_t)
+                logp, ent, values, hs, aux_pred = self.policy.evaluate(obs_a, b["obs"], b["gs"], b["h0"], b["first"], act_a, b["slot"])
                 m_act = b["learner"] * b["alive"]
                 m_val = b["learner"]
                 adv = b["adv"]
@@ -327,7 +346,10 @@ class MAPPOTrainer:
                 v_loss = torch.max((values - b["returns"]) ** 2, (v_clipped - b["returns"]) ** 2)
                 v_loss = 0.5 * (v_loss * m_val).sum() / m_val.sum().clamp(min=1)
                 ent_loss = (ent * m_act).sum() / m_act.sum().clamp(min=1)
-                loss = pg_loss + vf_coef * v_loss - ent_coef * ent_loss
+                aux_m = aux_t[..., 2] * m_act[..., None]
+                aux_loss = (((aux_pred - aux_t[..., :2]) ** 2).sum(-1) * aux_m).sum() / aux_m.sum().clamp(min=1)
+                loss = pg_loss + vf_coef * v_loss - ent_coef * ent_loss + aux_coef * aux_loss
+                agg["loss/aux_enemy_pos"].append(aux_loss.item())
                 if self.hier:
                     c_loss, c_ent = self._commander_loss(b, hs, adv_n, m_act, clip)
                     loss = loss + self.plan_coef * (c_loss - ent_coef * c_ent)
@@ -371,7 +393,8 @@ class MAPPOTrainer:
     # ----------------------------------------------------------------- train
     def train(self, updates: Optional[int] = None):
         tc = self.cfg["train"]
-        anneal = float(tc.get("shaping_anneal_frac", 0.3))
+        cc = tc.get("coverage_curriculum", {}) or {}
+        cov_start, cov_frac = float(cc.get("start", 0.06)), float(cc.get("frac", 0.33))
         log_every = int(tc.get("log_every", 1))
         ckpt_every = int(tc.get("checkpoint_every", 20))
         video_every = int(tc.get("video_every", 50))
@@ -379,7 +402,10 @@ class MAPPOTrainer:
         while self.update_idx < end:
             t0 = time.time()
             progress = self.update_idx / max(1, self.total_updates)
-            self.env.set_shaping_coef(max(0.0, 1.0 - progress / anneal) if anneal > 0 else 0.0)
+            ramp = min(1.0, progress / cov_frac) if cov_frac > 0 else 1.0
+            hi = cov_start + (self.env_cfg.coverage_max - cov_start) * ramp
+            lo = hi * self.env_cfg.coverage_min / self.env_cfg.coverage_max
+            self.env.set_coverage_range(lo, hi)
             roll = self.collect_rollout()
             t1 = time.time()
             upd = self.update()
@@ -391,7 +417,7 @@ class MAPPOTrainer:
             if self.update_idx % log_every == 0:
                 logs = {**roll, **upd, **self.league.summary(), "time/rollout_s": t1 - t0,
                         "time/update_s": time.time() - t1, "time/steps_per_s": self.rollout_len * self.E / (time.time() - t0),
-                        "stats/shaping_coef": self.env.shaping_coef}
+                        "stats/coverage_hi": self.env.coverage_range[1]}
                 for k, v in logs.items():
                     self.writer.add_scalar(k, v, self.global_step)
                 self._print(logs)
@@ -405,7 +431,8 @@ class MAPPOTrainer:
 
     def _print(self, logs):
         keys = ["win_rate/self", "win_rate/bot", "win_rate/pool", "elo/latest", "episode/return", "episode/length",
-                "behaviour/accuracy", "behaviour/friendly_fire_rate", "loss/policy", "loss/value", "stats/approx_kl",
+                "behaviour/accuracy", "behaviour/friendly_fire_rate", "behaviour/crossfire_rate", "behaviour/coverage_entropy",
+                "loss/policy", "loss/value", "loss/aux_enemy_pos", "stats/approx_kl",
                 "disc/accuracy", "time/steps_per_s"]
         parts = [f"{k.split('/')[-1]}={logs[k]:.3g}" for k in keys if k in logs]
         print(f"[update {self.update_idx}/{self.total_updates} step {self.global_step}] " + " ".join(parts), flush=True)

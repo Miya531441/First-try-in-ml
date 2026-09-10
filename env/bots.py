@@ -30,15 +30,12 @@ def _best_target(view):
     j = d.argmin(-1)
     visible = np.isfinite(d.min(-1))
     vis_target = np.take_along_axis(epos, j[..., None, None].repeat(2, -1), 2)[:, :, 0]
-    # team-wide freshest contact
-    valid = view["contact_valid"]
-    ctime = np.where(valid, view["contact_time"], -np.inf)
-    k = ctime.argmax(-1)                                         # [E]
-    any_valid = valid.any(-1)
-    team_contact = view["contact_pos"][np.arange(pos.shape[0]), k]  # [E,2]
-    own_ok = valid
-    fallback = np.where(own_ok[..., None], view["contact_pos"], team_contact[:, None])
-    has_fb = own_ok | any_valid[:, None]
+    # blackboard fallback: the freshest valid enemy track per agent
+    valid = view["track_valid"]                                  # [E,T,T_enemy]
+    ttime = np.where(valid, view["track_time"], -np.inf)
+    k = ttime.argmax(-1)                                         # [E,T]
+    has_fb = valid.any(-1)
+    fallback = np.take_along_axis(view["track_pos"], k[..., None, None].repeat(2, -1), 2)[:, :, 0]
     target = np.where(visible[..., None], np.nan_to_num(vis_target), fallback)
     return target, visible | has_fb, visible
 
@@ -144,7 +141,8 @@ class HolderBot(Bot):
         pos = view["pos"]
         centre = np.array([S / 2, S / 2], np.float32)
         for e, i in zip(*np.nonzero(need)):
-            bm = boxes[e][mask[e]]
+            walls = mask[e] & (view["box_kind"][e] == 0)
+            bm = boxes[e][walls] if walls.any() else boxes[e][mask[e]]
             if len(bm) == 0:
                 self.goal[e, i] = pos[e, i] + (centre - pos[e, i]) * 0.3
                 continue

@@ -45,8 +45,14 @@ class Renderer:
         s = self.screen
         s.fill((28, 28, 32))
         overlay = pg.Surface((self.W, self.W), pg.SRCALPHA)
-        for b in f["boxes"]:
-            pg.draw.rect(s, (110, 110, 118), pg.Rect(self._p((b[0], b[3])), (int((b[2] - b[0]) * k), int((b[3] - b[1]) * k))))
+        kinds = f.get("box_kind", np.zeros(len(f["boxes"]), int))
+        for b, kind in zip(f["boxes"], kinds):
+            rect = pg.Rect(self._p((b[0], b[3])), (int((b[2] - b[0]) * k), int((b[3] - b[1]) * k)))
+            if kind == 0:
+                pg.draw.rect(s, (110, 110, 118), rect)                       # wall: blocks vision + movement
+            else:
+                pg.draw.rect(s, (96, 74, 48), rect)                          # low crate: movement only
+                pg.draw.rect(s, (150, 120, 80), rect, 2)
         N = len(f["pos"])
         R = f["ray_dist"].shape[1]
         offsets = np.linspace(-cfg.fov / 2, cfg.fov / 2, R)
@@ -56,9 +62,12 @@ class Renderer:
                 continue
             col = TEAM_COLORS[int(f["team"][i])]
             ang = f["theta"][i] + offsets
+            # occlusion shadow: the full unobstructed cone drawn dim, the visible part drawn brighter
+            full = f["pos"][i] + np.stack([np.cos(ang), np.sin(ang)], -1) * cfg.vision_range
+            pg.draw.polygon(overlay, (*col, 18), [self._p(f["pos"][i])] + [self._p(e) for e in full])
             ends = f["pos"][i] + np.stack([np.cos(ang), np.sin(ang)], -1) * f["ray_dist"][i][:, None]
             poly = [self._p(f["pos"][i])] + [self._p(e) for e in ends]
-            pg.draw.polygon(overlay, (*col, 45), poly)
+            pg.draw.polygon(overlay, (*col, 55), poly)
             for r_, e in enumerate(ends):   # mark rays that see an agent body
                 if f["ray_kind"][i, r_] == 2:
                     pg.draw.circle(overlay, (255, 255, 120, 160), self._p(e), 2)
@@ -108,6 +117,7 @@ def save_episode(path: str, frames: List[Dict], cfg: EnvConfig):
     data = {k: np.stack([f[k] for f in frames]) for k in FRAME_KEYS}
     data["t"] = np.array([f["t"] for f in frames])
     data["team"], data["role"], data["boxes"] = frames[0]["team"], frames[0]["role"], frames[0]["boxes"]
+    data["box_kind"] = frames[0].get("box_kind", np.zeros(len(frames[0]["boxes"]), int))
     data["cfg"] = np.array([__import__("json").dumps(cfg.to_dict())])
     np.savez_compressed(path, **data)
 
@@ -118,7 +128,8 @@ def load_episode(path: str):
     frames = []
     for t in range(len(d["t"])):
         f = {k: d[k][t] for k in FRAME_KEYS}
-        f.update(t=int(d["t"][t]), team=d["team"], role=d["role"], boxes=d["boxes"])
+        f.update(t=int(d["t"][t]), team=d["team"], role=d["role"], boxes=d["boxes"],
+                 box_kind=d["box_kind"] if "box_kind" in d else np.zeros(len(d["boxes"]), int))
         frames.append(f)
     return frames, cfg
 

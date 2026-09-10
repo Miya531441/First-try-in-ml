@@ -1,0 +1,4 @@
+# Comms ablation: team blackboard = contacts_only
+inherit: ../roles.yaml
+env:
+  comms: contacts_only
