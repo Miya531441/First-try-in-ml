@@ -12,7 +12,7 @@ See `DESIGN.md` for assumptions, spec issues and the reasoning behind each compo
 ```
 env/      arena.py  agent.py  physics.py  raycast.py  spawn.py  squad_env.py  bots.py
 algo/     mappo.py  buffer.py  networks.py  league.py  discriminator.py  runner.py  utils.py
-scripts/  train.py  eval.py  render.py
+scripts/  train.py  eval.py  render.py  visualize.py
 configs/  base.yaml  roles.yaml  hierarchical.yaml  1v1_scripted.yaml  ablations/*.yaml
 tests/    test_env.py  test_algo.py
 ```
@@ -64,6 +64,16 @@ Replay a recorded episode:
 ```
 python scripts/render.py --episode runs/roles/videos/update_000050.npz          # window
 python scripts/render.py --episode runs/roles/videos/update_000050.npz --gif x.gif
+```
+
+Visualise how battles change across training stages (same layout and opponent for every
+checkpoint; writes per-stage GIFs, movement traces, a contact sheet of battle phases, a
+side-by-side GIF and a summary table into `runs/<name>/viz`):
+
+```
+python scripts/visualize.py --run runs/roles --stages 4 --opponent charger --seed 3
+python scripts/visualize.py --run runs/roles --times 0 5 10 20 40      # fixed-time columns
+python scripts/visualize.py --checkpoints a.pt b.pt --opponent self --out viz/
 ```
 
 Logs go to tensorboard under `runs/<name>`: `tensorboard --logdir runs`.
