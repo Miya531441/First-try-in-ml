@@ -1,0 +1,13 @@
+# The previous 48 m arena (area 2304 m2), for comparison against the 1.5x map.
+inherit: ../base.yaml
+env:
+  arena_size: 48.0
+  max_steps: 1200
+  obstacle_size_min: 4.0
+  obstacle_size_max: 11.0
+  max_obstacles: 48
+  spawn_distance: 30.0
+  corner_margin: 6.0
+  vision_range: 68.0
+  num_rays: 48
+  weapon_range: 68.0

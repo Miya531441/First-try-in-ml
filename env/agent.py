@@ -26,11 +26,11 @@ class RoleRewardConfig:
     """Role-specific and team-work incentives (all small, per step / per hp point)."""
     enabled: bool = True
     assault_close_damage: float = 0.005     # per hp dealt from within assault_close_range
-    assault_close_range: float = 10.0
+    assault_close_range: float = 12.0
     flank_damage: float = 0.01              # per hp dealt from the victim's rear half (angle > flank_angle_deg)
     flank_angle_deg: float = 90.0
     overwatch_spot: float = 0.002           # per step per enemy only this agent sees, from >= overwatch_min_range
-    overwatch_min_range: float = 12.0
+    overwatch_min_range: float = 15.0
     overwatch_assist_damage: float = 0.005  # per hp teammates deal to an enemy this agent currently sees
     crossfire_bonus: float = 0.1            # to both shooters of a crossfire hit (any role)
 
@@ -38,9 +38,9 @@ class RoleRewardConfig:
 @dataclass
 class EnvConfig:
     # world
-    arena_size: float = 48.0
+    arena_size: float = 58.79                             # area 3456 m2 (1.5x the original 48 m arena)
     dt: float = 0.05
-    max_steps: int = 1200
+    max_steps: int = 1500                                 # 75 s: the 83 m diagonal takes ~21 s to cross
     team_size: int = 3                                   # slots per team (max squad size)
     team_sizes: List[List[int]] = field(default_factory=lambda: [[3, 3], [2, 2], [3, 2], [2, 3]])
     team_size_probs: List[float] = field(default_factory=lambda: [0.4, 0.2, 0.2, 0.2])
@@ -48,17 +48,17 @@ class EnvConfig:
     coverage_min: float = 0.17
     coverage_max: float = 0.22
     crate_fraction: float = 0.15                          # share of obstacles that are low crates (sight passes over)
-    obstacle_size_min: float = 4.0                        # larger blocks: the 4 m gap caps how densely
-    obstacle_size_max: float = 11.0                       # small boxes can be packed (see DESIGN.md)
+    obstacle_size_min: float = 4.9                        # larger blocks: the 4 m gap caps how densely
+    obstacle_size_max: float = 13.5                       # small boxes can be packed (see DESIGN.md)
     obstacle_min_gap: float = 4.0
     spawn_clearance: float = 3.0
-    max_obstacles: int = 48
+    max_obstacles: int = 72
     # spawns
     spawn_mode: str = "corners"                          # corners (opposite diagonal corners) | lanes
-    spawn_distance: float = 30.0                          # lanes mode only
+    spawn_distance: float = 36.7                          # lanes mode only
     spawn_lateral_jitter: float = 4.0
     spawn_zone_radius: float = 4.0
-    corner_margin: float = 6.0                            # corners mode: spawn centre offset from the corner
+    corner_margin: float = 7.3                            # corners mode: spawn centre offset from the corner
     # body & motion
     collision_radius: float = 1.0
     speed_forward: float = 4.0
@@ -69,13 +69,13 @@ class EnvConfig:
     vel_tau: float = 0.1
     # sensing
     vision_fov_deg: float = 60.0
-    vision_range: float = 68.0                            # >= arena diagonal: the cone reaches the far wall
-    num_rays: int = 48                                    # spacing must resolve a 2 m body at max range
+    vision_range: float = 84.0                            # >= arena diagonal (83.1 m): the cone reaches the far wall
+    num_rays: int = 64                                    # spacing must resolve a 2 m body at max range
     map_rays: int = 64
     # weapon
     hp: float = 100.0
     damage: float = 34.0
-    weapon_range: float = 68.0                            # hitscan range; <= vision_range makes "see far,
+    weapon_range: float = 84.0                            # hitscan range; <= vision_range makes "see far,
                                                           # shoot near" (sight is limited by walls, not range)
     cooldown: float = 0.4
     magazine: int = 12
