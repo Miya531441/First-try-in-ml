@@ -45,7 +45,7 @@ env:
   spread_rest_deg: 0.5
   spread_max_deg: 2.0
   friendly_fire: true
-  timeout_hp_tiebreak: false
+  timeout_hp_tiebreak: true          # corner spawns make mutual avoidance easy; see DESIGN.md
   # team information
   comms: full                        # full | contacts_only | none
   track_staleness_cap: 10.0
@@ -55,7 +55,7 @@ env:
   reward:
     win: 1.0
     loss: -1.0
-    draw: 0.0
+    draw: -0.3                       # a timeout is bad for both teams, so hiding is not a way out
     damage_dealt: 0.01
     damage_taken: -0.005
     friendly_damage: -1.0            # per hp point (-34 per hit), see DESIGN.md
@@ -127,6 +127,7 @@ train:
   max_grad_norm: 0.5
   normalize_returns: true
   coverage_curriculum: {start: 0.06, frac: 0.33}
+  spawn_curriculum: {start: 0.45, frac: 0.33}   # corner spawns ramp out from mid-arena
   total_updates: 3000
   log_every: 1
   checkpoint_every: 20

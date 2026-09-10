@@ -369,3 +369,24 @@ def test_role_rewards():
     a[0, 0, 3] = 1.0
     _, _, rew, _, _ = env2.step(a)
     assert rew[0, 0] == pytest.approx(base, abs=1e-6)
+
+
+def test_spawn_curriculum_interpolates_towards_the_corners():
+    cfg = EnvConfig()
+    S = cfg.arena_size
+    env = SquadVecEnv(cfg, 8, seed=1)
+    env.set_corner_lerp(0.3)
+    env._reset_envs(np.arange(8))
+    near = np.linalg.norm(env.state.pos[:, :3].mean(1) - env.state.pos[:, 3:].mean(1), axis=-1)
+    env.set_corner_lerp(1.0)
+    env._reset_envs(np.arange(8))
+    far = np.linalg.norm(env.state.pos[:, :3].mean(1) - env.state.pos[:, 3:].mean(1), axis=-1)
+    assert near.mean() < 0.45 * far.mean()
+    assert far.mean() > 0.9 * S
+    # spawns stay inside the arena and clear of obstacles at every setting
+    for k in (0.05, 0.5, 1.0):
+        env.set_corner_lerp(k)
+        env._reset_envs(np.arange(8))
+        assert (env.state.pos > 0).all() and (env.state.pos < S).all()
+        inside = env.arena.point_in_boxes(env.state.pos, env.arena.boxes, env.arena.mask, margin=0.0)
+        assert not (inside & env.state.active).any()

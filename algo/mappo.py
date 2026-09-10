@@ -403,6 +403,8 @@ class MAPPOTrainer:
         tc = self.cfg["train"]
         cc = tc.get("coverage_curriculum", {}) or {}
         cov_start, cov_frac = float(cc.get("start", 0.06)), float(cc.get("frac", 0.33))
+        sc = tc.get("spawn_curriculum", {}) or {}
+        spawn_start, spawn_frac = float(sc.get("start", 0.45)), float(sc.get("frac", 0.33))
         log_every = int(tc.get("log_every", 1))
         ckpt_every = int(tc.get("checkpoint_every", 20))
         video_every = int(tc.get("video_every", 50))
@@ -414,6 +416,8 @@ class MAPPOTrainer:
             hi = cov_start + (self.env_cfg.coverage_max - cov_start) * ramp
             lo = hi * self.env_cfg.coverage_min / self.env_cfg.coverage_max
             self.env.set_coverage_range(lo, hi)
+            s_ramp = min(1.0, progress / spawn_frac) if spawn_frac > 0 else 1.0
+            self.env.set_corner_lerp(spawn_start + (1.0 - spawn_start) * s_ramp)
             roll = self.collect_rollout()
             t1 = time.time()
             upd = self.update()
@@ -425,7 +429,7 @@ class MAPPOTrainer:
             if self.update_idx % log_every == 0:
                 logs = {**roll, **upd, **self.league.summary(), "time/rollout_s": t1 - t0,
                         "time/update_s": time.time() - t1, "time/steps_per_s": self.rollout_len * self.E / (time.time() - t0),
-                        "stats/coverage_hi": self.env.coverage_range[1]}
+                        "stats/coverage_hi": self.env.coverage_range[1], "stats/corner_lerp": self.env.corner_lerp}
                 for k, v in logs.items():
                     self.writer.add_scalar(k, v, self.global_step)
                 self._print(logs)

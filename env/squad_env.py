@@ -56,6 +56,7 @@ class SquadVecEnv:
         self.state = AgentState(self.E, self.N, cfg)
         self.t = np.zeros(self.E, np.int64)
         self.coverage_range = (cfg.coverage_min, cfg.coverage_max)     # curriculum sets this
+        self.corner_lerp = 1.0                                          # curriculum sets this
         self.plan_token = np.zeros((self.E, 2), np.int64)
 
         E, N, R, T, K = self.E, self.N, self.R, self.T, self.K
@@ -140,6 +141,10 @@ class SquadVecEnv:
     def set_coverage_range(self, lo: float, hi: float):
         self.coverage_range = (float(lo), float(hi))
 
+    def set_corner_lerp(self, k: float):
+        """1.0 = full corner spawns, smaller = closer to the arena centre (curriculum)."""
+        self.corner_lerp = float(k)
+
     def reset(self, seed: Optional[int] = None):
         if seed is not None:
             self.seed(seed)
@@ -172,7 +177,7 @@ class SquadVecEnv:
             return
         boxes_l, kinds_l, pos, theta, roles, active = [], [], [], [], [], []
         for _ in idx:
-            b, k, p, h = spawn_episode(self.rng, self.cfg, self.T, self.coverage_range)
+            b, k, p, h = spawn_episode(self.rng, self.cfg, self.T, self.coverage_range, self.corner_lerp)
             boxes_l.append(b)
             kinds_l.append(k)
             pos.append(p)

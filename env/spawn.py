@@ -91,19 +91,22 @@ def generate_obstacles(rng: np.random.Generator, cfg, spawn_center: np.ndarray, 
     return np.zeros((0, 4), np.float32), np.zeros((0,), np.int64)
 
 
-def sample_spawn_center(rng: np.random.Generator, cfg) -> np.ndarray:
+def sample_spawn_center(rng: np.random.Generator, cfg, corner_lerp: float = 1.0) -> np.ndarray:
     """Team A's spawn centre; team B is always the point mirror (S - centre).
 
-    corners: a random diagonal corner, ``corner_margin`` from the walls, so the squads
-    start in opposite corners ~S*sqrt(2) apart.  lanes: the v1 behaviour, ``spawn_distance``
-    apart across the centre line."""
+    corners: a random diagonal corner, ``corner_margin`` from the walls, so the squads start
+    in opposite corners ~S*sqrt(2) apart.  ``corner_lerp`` in (0, 1] interpolates from the
+    arena centre (0) to the full corner (1); the training curriculum ramps it up so early
+    episodes start close enough to find each other.  lanes: ``spawn_distance`` apart across
+    the centre line."""
     S = cfg.arena_size
     if cfg.spawn_mode == "corners":
         m = cfg.corner_margin
         j = cfg.spawn_lateral_jitter * 0.5
-        x = m + rng.uniform(0.0, j)
-        y = (m + rng.uniform(0.0, j)) if rng.random() < 0.5 else (S - m - rng.uniform(0.0, j))
-        return np.array([x, y], np.float32)
+        cx = m + rng.uniform(0.0, j)
+        cy = (m + rng.uniform(0.0, j)) if rng.random() < 0.5 else (S - m - rng.uniform(0.0, j))
+        k = float(np.clip(corner_lerp, 0.05, 1.0))
+        return (np.array([S / 2, S / 2], np.float32) + (np.array([cx, cy], np.float32) - S / 2) * k).astype(np.float32)
     x = S / 2.0 - cfg.spawn_distance / 2.0
     y = rng.uniform(S / 2.0 - cfg.spawn_lateral_jitter, S / 2.0 + cfg.spawn_lateral_jitter)
     return np.array([x, y], np.float32)
@@ -126,10 +129,10 @@ def sample_team_positions(rng: np.random.Generator, cfg, center: np.ndarray, box
     return np.stack(pts)
 
 
-def spawn_episode(rng: np.random.Generator, cfg, team_size: int, coverage_range=None):
+def spawn_episode(rng: np.random.Generator, cfg, team_size: int, coverage_range=None, corner_lerp: float = 1.0):
     """(boxes [M,4], kinds [M], positions [2*team_size,2], headings [2*team_size])."""
     S = cfg.arena_size
-    center = sample_spawn_center(rng, cfg)
+    center = sample_spawn_center(rng, cfg, corner_lerp)
     boxes, kinds = generate_obstacles(rng, cfg, center, coverage_range)
     pos_a = sample_team_positions(rng, cfg, center, boxes, team_size)
     pos_b = (S - pos_a).astype(np.float32)

@@ -64,6 +64,21 @@
   isolates their effect, `no_roles.yaml` removes roles entirely.
 * **Squad sizes** are weighted 70% 3v3 so full-role squads dominate; 2v2 / 3v2 / 2v3 remain
   at 10% each so the policy still handles a missing role.
+* **Corner spawns make the search problem much harder, and that changes the reward
+  balance.** Squads start ~49 m apart with a 24 m cone in a 48 m arena, so a random policy
+  rarely meets the enemy at all.  In a 0.37M-step check every episode timed out, time to
+  first contact rose from 6 s to 40 s, and the draw rate hit 94%: with a draw worth 0 and
+  friendly fire worth -34 per hit, hiding beat fighting.  Two mitigations are now the
+  defaults, and both are config knobs:
+  - `reward.draw: -0.3` and `timeout_hp_tiebreak: true`, so a timeout is bad for both
+    teams and the healthier squad still wins one.  This cut the draw rate from 94% to 19%.
+  - `train.spawn_curriculum: {start: 0.45, frac: 0.33}` interpolates the spawn centres from
+    mid-arena out to the true corners over the first third of training (`stats/corner_lerp`
+    logs the ramp), so early episodes make contact in ~5 s instead of ~40 s.
+  Neither removes the underlying cost: at full corner separation contact still takes ~30 s
+  of a 60 s episode.  If contact time stays high late in training, lengthen
+  `train.spawn_curriculum.frac`, raise `env.max_steps`, or fall back to
+  `ablations/lane_spawns.yaml`.
 
 ## Assumptions carried over from v1
 

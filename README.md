@@ -100,6 +100,8 @@ Logs go to tensorboard under `runs/<name>`: `tensorboard --logdir runs`.
   squad's cone coverage over 12 sectors, 1 = evenly spread), `win_rate/squad_<AvB>`.
 * `loss/aux_enemy_pos` - auxiliary enemy-position prediction error (drops as the
   recurrent state learns to track enemies).
+* `stats/corner_lerp`, `stats/coverage_hi` - the spawn-distance and obstacle-coverage
+  curricula (both ramp over the first third of training).
 * `roles/<stat>/role<k>` - per-role behavioural statistics (distance to squad, distance to
   enemy, shots, distance travelled, flank fraction, unique spotting, accuracy);
   `disc/accuracy` - how identifiable the roles are from behaviour (role collapse shows up
