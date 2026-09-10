@@ -56,6 +56,7 @@ def generate_obstacles(rng: np.random.Generator, cfg, spawn_center: np.ndarray, 
     """Mirrored boxes reaching a target coverage fraction.  Returns (boxes [M,4], kinds [M])."""
     S = cfg.arena_size
     lo, hi = coverage_range if coverage_range is not None else (cfg.coverage_min, cfg.coverage_max)
+    area_max = hi * S * S                      # hard ceiling: never exceed the configured coverage
     target = rng.uniform(lo, hi) * S * S
     centers = np.stack([spawn_center, S - spawn_center])
     clearance = cfg.spawn_clearance + cfg.spawn_zone_radius
@@ -76,14 +77,17 @@ def generate_obstacles(rng: np.random.Generator, cfg, spawn_center: np.ndarray, 
             if any(_box_dist(box, o) < cfg.obstacle_min_gap or _box_dist(mirror, o) < cfg.obstacle_min_gap for o in boxes):
                 continue
             kind = CRATE if rng.random() < cfg.crate_fraction else WALL
-            if np.allclose(box, mirror, atol=0.5):      # self-mirrored central box: add once
+            self_mirrored = np.allclose(box, mirror, atol=0.5)
+            added = w * h if self_mirrored else 2 * w * h
+            if area + added > area_max:                 # would overshoot the ceiling: try a smaller box
+                continue
+            if self_mirrored:                           # self-mirrored central box: add once
                 boxes.append(box)
                 kinds.append(kind)
-                area += w * h
             else:
                 boxes += [box, mirror]
                 kinds += [kind, kind]
-                area += 2 * w * h
+            area += added
         arr = np.array(boxes, np.float32).reshape(-1, 4)
         if len(arr) == 0 or connected(arr, S, centers[0], centers[1], cfg.collision_radius):
             return arr, np.array(kinds, np.int64)

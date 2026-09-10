@@ -139,8 +139,9 @@ def test_mirror_augmentation_is_an_involution_and_consistent():
     assert torch.allclose(mirror_obs(m, env.obs_layout, env.obs_dim), obs)
     assert not torch.allclose(m, obs)
     lay = env.obs_layout["vision"]
-    v = obs[:, lay["start"]: lay["start"] + lay["size"]].view(-1, 32, 5)
-    mv = m[:, lay["start"]: lay["start"] + lay["size"]].view(-1, 32, 5)
+    R, C = lay["shape"]
+    v = obs[:, lay["start"]: lay["start"] + lay["size"]].reshape(-1, R, C)
+    mv = m[:, lay["start"]: lay["start"] + lay["size"]].reshape(-1, R, C)
     assert torch.equal(mv, v.flip(1))
     a = torch.tensor([[0.3, 0.5, -0.7, 1.0]])
     assert torch.equal(mirror_action(mirror_action(a, "hybrid"), "hybrid"), a)

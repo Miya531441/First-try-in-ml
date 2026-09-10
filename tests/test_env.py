@@ -102,6 +102,7 @@ def test_firing_ray_bisects_cone():
 
 def test_damage_resolution_and_kill():
     cfg = _cfg(na=1, nb=1, spread_rest_deg=0.0, spread_max_deg=0.0)
+    cfg.role_rewards.enabled = False                      # base reward only; role bonuses are tested separately
     env = SquadVecEnv(cfg, 1, seed=1)
     _place(env, np.array([[10.0, 10.0], [20.0, 10.0]]), np.array([0.0, np.pi]))
     a = np.zeros((1, 2, 4), np.float32)
@@ -315,10 +316,13 @@ def test_mirrored_layout_and_spawns():
         ca, cb = pa.mean(0), pb.mean(0)
         assert np.linalg.norm(ca - cb) > 0.9 * S
         assert (ca < 12).all() or (ca[0] < 12 and ca[1] > S - 12)
-    env = SquadVecEnv(EnvConfig(spawn_mode="lanes"), 2, seed=5)
-    for e in range(2):
+    env = SquadVecEnv(EnvConfig(spawn_mode="lanes"), 4, seed=5)
+    # squad centroids sit within the spawn zone of each centre, so allow that slack
+    slack = 2 * cfg.spawn_zone_radius
+    for e in range(4):
         pa, pb = env.state.pos[e, :3], env.state.pos[e, 3:]
-        assert cfg.spawn_distance - 2 < np.linalg.norm(pa.mean(0) - pb.mean(0)) < cfg.spawn_distance + 6
+        assert np.allclose(S - pa, pb)
+        assert cfg.spawn_distance - slack < np.linalg.norm(pa.mean(0) - pb.mean(0)) < cfg.spawn_distance + slack
 
 
 def test_pettingzoo_api():
@@ -390,3 +394,55 @@ def test_spawn_curriculum_interpolates_towards_the_corners():
         assert (env.state.pos > 0).all() and (env.state.pos < S).all()
         inside = env.arena.point_in_boxes(env.state.pos, env.arena.boxes, env.arena.mask, margin=0.0)
         assert not (inside & env.state.active).any()
+
+
+def test_vision_reaches_the_far_wall_and_is_limited_only_by_obstacles():
+    """With vision_range >= the arena diagonal, an unobstructed cone terminates on a wall,
+    never on the range clip, and a sight-blocking obstacle is what shortens it."""
+    cfg = EnvConfig()
+    S = cfg.arena_size
+    assert cfg.vision_range >= S * np.sqrt(2) - 1e-6
+    env = SquadVecEnv(_cfg(na=1, nb=1), 1, seed=1)
+    ec = env.cfg
+    # corner to corner, empty arena: the centre ray runs the full diagonal
+    _place(env, np.array([[1.5, 1.5], [S - 1.5, S - 1.5]]), np.array([np.pi / 4, np.pi]))
+    R = ec.num_rays
+    centre = R // 2
+    diag = np.linalg.norm(np.array([S - 3.0, S - 3.0]))
+    assert env.ray_kind[0, 0, centre] in (1, 2)                    # a wall or the enemy, not "nothing"
+    assert env.ray_dist[0, 0, centre] > 0.9 * diag
+    assert bool(env.vis[0, 0, 1])                                  # the enemy is visible across the whole arena
+    # a wall on the diagonal cuts the sightline; a low crate does not
+    for kind, visible in ((WALL, False), (CRATE, True)):
+        env2 = SquadVecEnv(_cfg(na=1, nb=1), 1, seed=1)
+        _place(env2, np.array([[1.5, 1.5], [S - 1.5, S - 1.5]]), np.array([np.pi / 4, np.pi]),
+               boxes=[[22, 22, 26, 26]], kinds=[kind])
+        assert bool(env2.vis[0, 0, 1]) is visible
+        if kind == WALL:
+            assert env2.ray_dist[0, 0, centre] < 32.0
+
+
+def test_ray_spacing_resolves_a_body_at_maximum_range():
+    """A 2 m wide body at the far end of the cone must not fall between two rays."""
+    cfg = EnvConfig()
+    spacing = np.deg2rad(cfg.vision_fov_deg) / (cfg.num_rays - 1)
+    subtended = 2 * np.arctan(cfg.collision_radius / cfg.vision_range)
+    assert spacing < subtended
+    # empirically: an enemy dead ahead at long range is seen by at least one ray
+    env = SquadVecEnv(_cfg(na=1, nb=1), 1, seed=1)
+    S = cfg.arena_size
+    for dist in (20.0, 35.0, 45.0):
+        _place(env, np.array([[2.0, 24.0], [2.0 + dist, 24.0]]), np.array([0.0, np.pi]))
+        assert (env.ray_kind[0, 0] == 2).any(), f"enemy at {dist} m missed by every ray"
+
+
+def test_denser_cover_still_leaves_the_spawns_connected():
+    cfg = EnvConfig()
+    env = SquadVecEnv(cfg, 12, seed=4)
+    S = cfg.arena_size
+    for e in range(12):
+        boxes = env.arena.boxes[e][env.arena.mask[e]]
+        area = ((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])).sum() / S ** 2
+        assert area <= cfg.coverage_max + 1e-6
+        a, b = env.state.pos[e, :3].mean(0), env.state.pos[e, 3:].mean(0)
+        assert connected(boxes, S, a, b, cfg.collision_radius)

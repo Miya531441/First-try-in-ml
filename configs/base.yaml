@@ -10,15 +10,15 @@ env:
   team_size: 3                       # slots per team
   team_sizes: [[3, 3], [2, 2], [3, 2], [2, 3]]
   team_size_probs: [0.7, 0.1, 0.1, 0.1]
-  # obstacles by coverage fraction (curriculum raises the upper bound 6% -> 18%, see train)
-  coverage_min: 0.12
-  coverage_max: 0.18
-  crate_fraction: 0.4                # share of low crates (block movement only)
-  obstacle_size_min: 2.0
-  obstacle_size_max: 8.0
+  # obstacles by coverage fraction (curriculum raises the upper bound 8% -> 22%, see train)
+  coverage_min: 0.17                 # denser cover: sight now reaches the far wall
+  coverage_max: 0.22                 # ~22% is the ceiling under a 4 m minimum gap, see DESIGN.md
+  crate_fraction: 0.15               # share of low crates (block movement only); 0.0 = every obstacle blocks sight
+  obstacle_size_min: 4.0             # larger blocks pack better against the 4 m gap and cut long sightlines
+  obstacle_size_max: 11.0
   obstacle_min_gap: 4.0
   spawn_clearance: 3.0
-  max_obstacles: 32
+  max_obstacles: 48
   spawn_mode: corners                # corners (opposite diagonal corners, ~49 m apart) | lanes
   corner_margin: 6.0
   spawn_distance: 30.0               # lanes mode only
@@ -33,8 +33,8 @@ env:
   turn_accel_deg: 600.0
   # sensing
   vision_fov_deg: 60.0
-  vision_range: 24.0
-  num_rays: 32
+  vision_range: 68.0                 # >= arena diagonal (67.9 m): the cone is limited by walls, not by range
+  num_rays: 48                       # 1.28 deg spacing resolves a 2 m body at 68 m
   map_rays: 64
   # weapon
   hp: 100
@@ -126,7 +126,7 @@ train:
   mirror_aug: 0.5                    # probability of mirroring a sequence (actor only)
   max_grad_norm: 0.5
   normalize_returns: true
-  coverage_curriculum: {start: 0.06, frac: 0.33}
+  coverage_curriculum: {start: 0.08, frac: 0.33}
   spawn_curriculum: {start: 0.45, frac: 0.33}   # corner spawns ramp out from mid-arena
   total_updates: 3000
   log_every: 1

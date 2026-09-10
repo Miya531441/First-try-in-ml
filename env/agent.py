@@ -45,14 +45,14 @@ class EnvConfig:
     team_sizes: List[List[int]] = field(default_factory=lambda: [[3, 3], [2, 2], [3, 2], [2, 3]])
     team_size_probs: List[float] = field(default_factory=lambda: [0.4, 0.2, 0.2, 0.2])
     # obstacles: parameterised by coverage fraction of the arena area
-    coverage_min: float = 0.12
-    coverage_max: float = 0.18
-    crate_fraction: float = 0.4                           # share of obstacles that are low crates
-    obstacle_size_min: float = 2.0
-    obstacle_size_max: float = 8.0
+    coverage_min: float = 0.17
+    coverage_max: float = 0.22
+    crate_fraction: float = 0.15                          # share of obstacles that are low crates (sight passes over)
+    obstacle_size_min: float = 4.0                        # larger blocks: the 4 m gap caps how densely
+    obstacle_size_max: float = 11.0                       # small boxes can be packed (see DESIGN.md)
     obstacle_min_gap: float = 4.0
     spawn_clearance: float = 3.0
-    max_obstacles: int = 32
+    max_obstacles: int = 48
     # spawns
     spawn_mode: str = "corners"                          # corners (opposite diagonal corners) | lanes
     spawn_distance: float = 30.0                          # lanes mode only
@@ -69,8 +69,8 @@ class EnvConfig:
     vel_tau: float = 0.1
     # sensing
     vision_fov_deg: float = 60.0
-    vision_range: float = 24.0
-    num_rays: int = 32
+    vision_range: float = 68.0                            # >= arena diagonal: the cone reaches the far wall
+    num_rays: int = 48                                    # spacing must resolve a 2 m body at max range
     map_rays: int = 64
     # weapon
     hp: float = 100.0
