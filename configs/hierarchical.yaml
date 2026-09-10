@@ -1,0 +1,7 @@
+# Milestone 6: hierarchical commander emitting a plan token every 20 steps.
+inherit: roles.yaml
+hierarchical:
+  enabled: true
+  plan_tokens: 4      # {regroup, split_flank, push, hold}
+  interval: 20
+  loss_coef: 1.0

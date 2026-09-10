@@ -1,0 +1,3 @@
+inherit: ../roles.yaml
+model:
+  policy: per_slot

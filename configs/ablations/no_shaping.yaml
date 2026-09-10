@@ -1,0 +1,4 @@
+inherit: ../roles.yaml
+env:
+  reward:
+    shaping_los: 0.0

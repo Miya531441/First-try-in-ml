@@ -1,0 +1,94 @@
+# Milestone 3: 3v3 self-play, shared recurrent policy, no role conditioning.
+seed: 0
+
+env:
+  arena_size: 64.0
+  dt: 0.05
+  max_steps: 1200
+  team_size: 3
+  num_obstacles_min: 8
+  num_obstacles_max: 16
+  obstacle_size_min: 2.0
+  obstacle_size_max: 10.0
+  spawn_distance: 40.0
+  spawn_lateral_jitter: 6.0
+  collision_radius: 0.4
+  max_speed: 4.0
+  max_turn_rate_deg: 180.0
+  vision_fov_deg: 60.0
+  vision_range: 30.0
+  num_rays: 32
+  hp: 100
+  damage: 34
+  cooldown: 0.4
+  magazine: 12
+  reload_time: 2.0
+  spread_rest_deg: 0.5
+  spread_max_deg: 2.0
+  friendly_fire: true
+  timeout_hp_tiebreak: false
+  include_prev_action: true
+  num_roles: 3
+  reward:
+    win: 1.0
+    loss: -1.0
+    draw: 0.0
+    damage_dealt: 0.01
+    damage_taken: -0.005
+    friendly_damage: -1.0     # per hp point; see DESIGN.md - this is -34 per hit
+    kill: 0.5
+    kill_split: false
+    death: -0.5
+    step: -0.0005
+    shaping_los: 0.001        # annealed to 0 over train.shaping_anneal_frac
+
+model:
+  memory: gru            # gru | framestack
+  frame_stack: 4
+  hidden: 256
+  action_mode: hybrid    # hybrid (Gaussian + Bernoulli) | discrete (4 categorical heads)
+  policy: shared         # shared | per_slot
+
+roles:
+  enabled: false
+
+diversity:
+  enabled: false
+  beta: 0.05
+
+hierarchical:
+  enabled: false
+  plan_tokens: 4
+  interval: 20
+  loss_coef: 1.0
+
+league:
+  p_latest: 0.7
+  win_floor: 0.1
+  elo_k: 16.0
+  snapshot_every: 20
+  max_snapshots: 20
+  scripted: [spinner, charger, holder]   # bots that live in the pool (Elo tracked)
+  scripted_only: false
+
+train:
+  num_envs: 128
+  rollout_len: 256
+  chunk_len: 32
+  minibatches: 4
+  epochs: 4
+  lr: 3.0e-4
+  lr_anneal: true
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip: 0.2
+  entropy_coef: 0.01
+  entropy_coef_final: 0.001
+  value_coef: 0.5
+  max_grad_norm: 0.5
+  normalize_returns: true
+  shaping_anneal_frac: 0.3
+  total_updates: 3000
+  log_every: 1
+  checkpoint_every: 20
+  video_every: 50

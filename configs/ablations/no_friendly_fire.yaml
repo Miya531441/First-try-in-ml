@@ -1,0 +1,3 @@
+inherit: ../roles.yaml
+env:
+  friendly_fire: false

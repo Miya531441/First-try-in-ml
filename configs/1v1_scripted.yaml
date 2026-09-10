@@ -1,0 +1,11 @@
+# Milestone 2: 1v1 against scripted bots, PPO with the same machinery, no roles.
+inherit: base.yaml
+env:
+  team_size: 1
+  timeout_hp_tiebreak: true
+league:
+  scripted: [random, spinner, charger, holder]
+  scripted_only: true
+train:
+  num_envs: 64
+  total_updates: 400

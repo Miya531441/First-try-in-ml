@@ -1,0 +1,4 @@
+inherit: ../roles.yaml
+model:
+  memory: framestack
+  frame_stack: 4
