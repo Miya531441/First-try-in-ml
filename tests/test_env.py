@@ -352,8 +352,10 @@ def test_role_rewards():
     a[0, 1, 3] = 1.0
     _, _, rew, _, info = env.step(a)
     assert info["hit_enemy"][0, 1] and info["engage_angle"][0, 1] > rr.flank_angle_deg
-    assert rew[0, 1] == pytest.approx(base + rr.flank_damage * 34, abs=1e-5)
-    # crossfire: agents 0 and 1 hit the same target within 2 s from bearings 90 deg apart
+    # flank bonus plus the crossfire bonus: agent 0 hit the same victim 0.45 s earlier from
+    # a bearing ~90 deg away, so both shooters are paid the crossfire bonus
+    assert rew[0, 1] == pytest.approx(base + rr.flank_damage * 34 + rr.crossfire_bonus, abs=1e-5)
+    assert rew[0, 0] == pytest.approx(cfg.reward.step + rr.crossfire_bonus, abs=1e-5)
     ep = env._episode_summary(np.array([0]), np.array([-1]))
     assert ep["crossfire_rate"][0, 0] > 0
     # disabling role rewards removes the extras
