@@ -88,3 +88,21 @@
 | per step alive | -0.0005 |
 | enemy in cone with LOS | +0.001 per step, annealed to 0 over the first 30% of training |
 | role diversity | beta * (log q(z\|tau) - log 1/3) at episode end, beta = 0.05 |
+
+## Findings from smoke runs (CPU, 1v1 vs scripted bots, <=1.3M steps)
+
+* The pipeline learns: against the random bot the policy reaches a ~94% win rate within
+  0.6M steps (Elo 1000 -> 1160) with accuracy rising from 0 to 5-9%.
+* **Aiming vs exploration noise.** The turn channel maps [-1, 1] to +/-180 deg/s, i.e. 9
+  degrees per step at full deflection.  A Gaussian policy with std 0.6 therefore jitters the
+  aim by ~5 degrees per step, which at 20 m is a 1.7 m error on a 0.4 m target: accuracy
+  stays at ~0.5% and the agent only learns to evade.  `model.init_log_std` (default -1.0,
+  std 0.37) narrows this; consider a smaller `max_turn_rate` for the policy or a
+  state-dependent std if accuracy plateaus.  The discrete variant's turn table was refined
+  to {-1, -0.3, -0.1, 0, 0.1, 0.3, 1} for the same reason (a 4.5 degree minimum step
+  cannot aim at all).
+* The spawn distance (40 m) exceeds the vision range (30 m), so nothing is visible at
+  spawn and the agent must move before the LOS shaping can help; time to first contact
+  stays at ~3 s for bots and ~40 s for a timid learner.  Perfect-aim bots (spinner,
+  holder) kill a learner within ~2 s when spawned 20 m apart; start milestone 2 against
+  the random bot, then mix in the others via the league's prioritised sampling.

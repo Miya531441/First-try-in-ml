@@ -48,6 +48,7 @@ model:
   hidden: 256
   action_mode: hybrid    # hybrid (Gaussian + Bernoulli) | discrete (4 categorical heads)
   policy: shared         # shared | per_slot
+  init_log_std: -1.0     # initial Gaussian std (0.37); the turn channel maps to 180 deg/s so wide noise ruins aim
 
 roles:
   enabled: false

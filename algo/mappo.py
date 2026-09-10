@@ -36,7 +36,7 @@ def build_policy(cfg: dict, env: SquadVecEnv) -> ActorCritic:
     return ActorCritic(env.obs_dim, env.gs_dim, env.R, env.T, hidden=int(mc.get("hidden", 256)),
                        use_gru=mc.get("memory", "gru") == "gru", stack=stack, action_mode=mc.get("action_mode", "hybrid"),
                        num_policies=env.T if mc.get("policy", "shared") == "per_slot" else 1,
-                       plan_tokens=env.cfg.plan_tokens)
+                       plan_tokens=env.cfg.plan_tokens, init_log_std=float(mc.get("init_log_std", -1.0)))
 
 
 class FrameStack:

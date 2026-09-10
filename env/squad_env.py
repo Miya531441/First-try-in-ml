@@ -22,7 +22,7 @@ from env.spawn import spawn_episode
 DISCRETE_TABLE = [
     np.array([-1.0, 0.0, 1.0], np.float32),
     np.array([-1.0, 0.0, 1.0], np.float32),
-    np.array([-1.0, -0.5, 0.0, 0.5, 1.0], np.float32),
+    np.array([-1.0, -0.3, -0.1, 0.0, 0.1, 0.3, 1.0], np.float32),   # fine turn steps so aiming is possible
     np.array([0.0, 1.0], np.float32),
 ]
 DISCRETE_NVEC = [len(t) for t in DISCRETE_TABLE]

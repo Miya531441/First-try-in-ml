@@ -59,7 +59,7 @@ class Policy(nn.Module):
     """One actor + critic pair."""
 
     def __init__(self, obs_dim: int, gs_dim: int, num_rays: int, hidden: int = 256, use_gru: bool = True,
-                 stack: int = 1, action_mode: str = "hybrid", plan_tokens: int = 0):
+                 stack: int = 1, action_mode: str = "hybrid", plan_tokens: int = 0, init_log_std: float = -1.0):
         super().__init__()
         self.obs_dim, self.hidden, self.use_gru, self.stack, self.action_mode = obs_dim, hidden, use_gru, stack, action_mode
         self.encoder = ObsEncoder(obs_dim, num_rays, stack, hidden)
@@ -69,7 +69,7 @@ class Policy(nn.Module):
                 (nn.init.orthogonal_ if "weight" in name else nn.init.zeros_)(p)
         if action_mode == "hybrid":
             self.mu = _init(nn.Linear(hidden, 3), 0.01)
-            self.log_std = nn.Parameter(torch.full((3,), -0.5))
+            self.log_std = nn.Parameter(torch.full((3,), float(init_log_std)))
             self.fire = _init(nn.Linear(hidden, 1), 0.01)
         else:
             self.heads = nn.ModuleList([_init(nn.Linear(hidden, n), 0.01) for n in DISCRETE_NVEC])
@@ -141,13 +141,13 @@ class ActorCritic(nn.Module):
 
     def __init__(self, obs_dim: int, gs_dim: int, num_rays: int, team_size: int, hidden: int = 256,
                  use_gru: bool = True, stack: int = 1, action_mode: str = "hybrid", num_policies: int = 1,
-                 plan_tokens: int = 0):
+                 plan_tokens: int = 0, init_log_std: float = -1.0):
         super().__init__()
         self.hidden, self.team_size, self.stack, self.action_mode = hidden, team_size, stack, action_mode
         self.obs_dim, self.gs_dim, self.num_rays, self.use_gru, self.plan_tokens = obs_dim, gs_dim, num_rays, use_gru, plan_tokens
         self.num_policies = num_policies
-        self.policies = nn.ModuleList([Policy(obs_dim, gs_dim, num_rays, hidden, use_gru, stack, action_mode, plan_tokens)
-                                       for _ in range(num_policies)])
+        self.policies = nn.ModuleList([Policy(obs_dim, gs_dim, num_rays, hidden, use_gru, stack, action_mode, plan_tokens,
+                                              init_log_std) for _ in range(num_policies)])
 
     def _groups(self, slot: torch.Tensor):
         if self.num_policies == 1:
