@@ -5,7 +5,8 @@ Squads of 2-3 agents learn, purely through self-play, to eliminate an enemy squa
 corners.  Each squad member is assigned a role (assault, flanker, overwatch) with its own
 small incentive, a diversity bonus keeps the roles behaviourally distinct, and a
 crossfire bonus rewards coordinated fire.  Every agent only perceives
-the world through a 60 degree, 24 m vision cone plus a shared team blackboard (ally slots,
+the world through a 60 degree cone that reaches the far wall (sight is blocked by
+obstacles, not by a range limit) plus a shared team blackboard (ally slots,
 persistent enemy tracks with staleness/confidence) and a 64-ray static map scan, so the
 task is a hard POMDP and coordination (splitting, flanking, crossfire, covering angles)
 is the skill to be learned.

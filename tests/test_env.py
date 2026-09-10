@@ -446,3 +446,18 @@ def test_denser_cover_still_leaves_the_spawns_connected():
         assert area <= cfg.coverage_max + 1e-6
         a, b = env.state.pos[e, :3].mean(0), env.state.pos[e, 3:].mean(0)
         assert connected(boxes, S, a, b, cfg.collision_radius)
+
+
+def test_weapon_range_can_be_shorter_than_sight():
+    """Sight reaches the far wall; a shorter weapon_range makes distant targets unhittable."""
+    cfg = _cfg(na=1, nb=1, spread_rest_deg=0.0, spread_max_deg=0.0, weapon_range=15.0)
+    env = SquadVecEnv(cfg, 1, seed=1)
+    a = np.zeros((1, 2, 4), np.float32)
+    a[0, 0, 3] = 1.0
+    for dist, should_hit in ((10.0, True), (25.0, False)):
+        _place(env, np.array([[2.0, 24.0], [2.0 + dist, 24.0]]), np.array([0.0, np.pi]))
+        assert bool(env.vis[0, 0, 1])                      # visible at both ranges
+        env.state.hp[0, 1] = 100.0
+        env.state.cooldown[0] = 0.0
+        _, _, _, _, info = env.step(a)
+        assert bool(info["hit_enemy"][0, 0]) is should_hit

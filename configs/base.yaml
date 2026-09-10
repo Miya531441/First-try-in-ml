@@ -39,6 +39,7 @@ env:
   # weapon
   hp: 100
   damage: 34
+  weapon_range: 68.0                 # hitscan range; lower it below vision_range for "see far, shoot near"
   cooldown: 0.4
   magazine: 12
   reload_time: 2.0

@@ -80,6 +80,33 @@
   `train.spawn_curriculum.frac`, raise `env.max_steps`, or fall back to
   `ablations/lane_spawns.yaml`.
 
+## Full-arena vision and denser opaque cover
+
+* **Sight is now limited by geometry, not by a range clip.** `vision_range` is 68 m, just
+  over the 67.9 m arena diagonal, so every ray terminates on a wall, an agent, or the arena
+  boundary.  Measured over random rollouts, 100% of rays end on geometry (84% before) and
+  the fraction of live agents with an enemy in view rose from 0.00% to 3.2%.
+* **Ray count 32 -> 48.**  A 2 m body at 68 m subtends 1.69 degrees while 32 rays over a
+  60 degree cone are 1.94 degrees apart, so distant enemies fell *between* rays and were
+  invisible to the vision channel.  48 rays give 1.28 degree spacing, a 1.3x margin, and
+  `test_ray_spacing_resolves_a_body_at_maximum_range` pins this.
+* **More opaque cover.**  Coverage is 17-22% (was 12-18%) and the low-crate share is down
+  to 15%, so most obstacles block sight.  Set `crate_fraction: 0.0` to make every obstacle
+  opaque.
+* **The 4 m minimum gap caps coverage near 22%.**  With small 2-8 m boxes the generator
+  stalls at ~12% no matter how many obstacles it is allowed, because each box needs a 4 m
+  clear halo.  Larger 4-11 m blocks reach ~19-22%, and they cut long sightlines far more
+  effectively than scattered small boxes, so the size range was raised rather than the gap
+  lowered.  Asking for more than ~22% with a 4 m gap is geometrically impossible in a 48 m
+  arena; the generator now refuses to overshoot the ceiling instead of exceeding it.
+* **Long-range fire is a live balance question.**  Shots have always been unlimited range;
+  what changed is that agents can now *see* far enough to aim at distant targets.  A
+  stationary, aimed agent hits a 1 m radius body 99.5% of the time at 60 m, so there is no
+  range falloff discouraging fire from spawn.  Movement spread is the only counterweight
+  (36.7% at 60 m at full speed, 84.8% at 20 m).  `env.weapon_range` (default 68 m, i.e.
+  unchanged) lowers the hitscan range independently of sight if "see far, shoot near" is
+  wanted; raising `spread_max_deg` is the other lever.
+
 ## Assumptions carried over from v1
 
 * **Frames.** Local frame is x forward, y left.  Team B's world is point-mirrored about the

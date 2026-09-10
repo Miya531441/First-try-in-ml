@@ -291,7 +291,7 @@ class SquadVecEnv:
         d = np.stack([np.cos(aim), np.sin(aim)], -1).astype(np.float32)
         cmask = st.alive[:, None, :] & ~np.eye(N, dtype=bool)[None]
         sdist, skind, svictim = cast_rays(st.pos, d, self.arena.boxes, self.arena.wall_mask, st.pos,
-                                          cfg.collision_radius, cmask, cfg.arena_size, 1e6)
+                                          cfg.collision_radius, cmask, cfg.arena_size, cfg.weapon_range)
         hit_agent = fire & (skind == 2)
         victim = np.where(hit_agent, svictim, -1)
         victim_team = np.take_along_axis(st.team, np.maximum(victim, 0), 1)

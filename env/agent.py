@@ -75,6 +75,8 @@ class EnvConfig:
     # weapon
     hp: float = 100.0
     damage: float = 34.0
+    weapon_range: float = 68.0                            # hitscan range; <= vision_range makes "see far,
+                                                          # shoot near" (sight is limited by walls, not range)
     cooldown: float = 0.4
     magazine: int = 12
     reload_time: float = 2.0
