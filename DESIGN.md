@@ -107,6 +107,58 @@
   unchanged) lowers the hitscan range independently of sight if "see far, shoot near" is
   wanted; raising `spread_max_deg` is the other lever.
 
+## Results from the 1.5x arena run (2.58M steps, CPU, conv encoder)
+
+600 updates were requested; the run died at update 420 on a league bug (now fixed and
+covered by `test_league_snapshot_eviction_keeps_the_pool_usable`: evicting a snapshot from
+the pool left environments holding a dangling opponent reference).  2.58M steps of data
+survived, and Elo was still climbing at +1.55 per update when it stopped, so these are
+mid-training trends, not a converged policy.  Note the run used `model.encoder=conv_mlp`
+for CPU throughput, so it says nothing about the entity-token default.
+
+**Combat skill clearly improves.**
+
+| metric | first fifth | last fifth |
+|---|---|---|
+| Elo | 814 | 1104 |
+| win rate vs scripted bots | 0.01 | 0.36 |
+| shot accuracy | 0.070 | 0.128 |
+| friendly-fire rate | 0.014 | 0.000 |
+| mean episode return | -5.92 | +0.43 |
+
+Final checkpoint win rates over 40 episodes: random 1.00, spinner 0.70, charger 0.47,
+holder 0.35, self 0.55.  Friendly fire is fully eliminated, which is what the -34 per hit
+penalty was for.
+
+**Squad play collapses into a blob, and the roles do not separate at all.**
+
+| metric | first fifth | last fifth | wanted |
+|---|---|---|---|
+| teammate pair distance | 8.7 m | 4.4 m | larger (splitting) |
+| angular coverage entropy | 0.569 | 0.485 | larger (covering angles) |
+| mean engagement angle | 85 deg | 38 deg | larger (flanking) |
+| flank fraction | 0.49 | 0.18 | larger |
+| crossfire rate | 0.000 | 0.003 | larger |
+| discriminator accuracy | 0.377 | 0.362 | >> 0.333 (chance) |
+
+Over the last 60 updates the three roles differ by at most 0.011 on *every* logged
+statistic (distance to squad centroid, distance to nearest enemy, shots, distance
+travelled, flank fraction, spotting, accuracy).  This is role collapse, and the diversity
+bonus did not prevent it: with the discriminator at chance, `beta * (log q - log 1/3)` is
+approximately zero, so the bonus supplies no gradient exactly when it is most needed.
+
+**Why the blob wins, and what to try.**  Clumping and facing the same way both concentrates
+fire and drives friendly fire to zero, which is worth far more than the role bonuses
+(0.005-0.01 per hp) under the -1.0 per hp friendly-fire penalty.  Splitting is punished
+before it can pay off.  Candidate fixes, roughly in order of expected effect:
+1. Cut `reward.friendly_damage` toward -0.1 per hp so spreading out is not the only way to
+   avoid catastrophic penalties (this was flagged as a spec risk from the start).
+2. Raise `diversity.beta` and warm up the discriminator, or make the bonus per step rather
+   than terminal, so it is non-zero before roles differ.
+3. Raise the role bonuses and `crossfire_bonus` by an order of magnitude; the crossfire
+   bonus never bootstraps because crossfire essentially never happens by chance.
+4. Add an explicit anti-clumping term, or make friendly fire a function of proximity.
+
 ## Assumptions carried over from v1
 
 * **Frames.** Local frame is x forward, y left.  Team B's world is point-mirrored about the

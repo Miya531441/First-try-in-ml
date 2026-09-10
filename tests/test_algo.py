@@ -1,5 +1,7 @@
 """Algorithm-level tests: GAE, chunked sequence evaluation matches the acting pass,
 buffer/minibatch layout, league Elo bookkeeping, discriminator bonus."""
+import os
+
 import numpy as np
 import torch
 
@@ -153,3 +155,32 @@ def test_mirror_augmentation_is_an_involution_and_consistent():
     stacked = torch.cat([obs, obs], -1)
     ms = mirror_obs(stacked, env.obs_layout, env.obs_dim)
     assert torch.allclose(ms[:, : env.obs_dim], m) and torch.allclose(ms[:, env.obs_dim:], m)
+
+
+def test_league_snapshot_eviction_keeps_the_pool_usable(tmp_path):
+    """Evicting old snapshots must not leave dangling opponent references (regression:
+    a 2.6M-step run died with KeyError once the pool started rolling over)."""
+    lg = League(str(tmp_path), max_snapshots=3, scripted=["charger"])
+    ac = _ac(_env(), hidden=8, d_model=8, n_heads=2)
+    names = [lg.add_snapshot(ac, i) for i in range(1, 7)]
+    assert len(lg.snapshot_names) == 3
+    evicted = [n for n in names if n not in lg.members]
+    assert evicted, "expected some snapshots to be evicted"
+    # every sampled opponent stays loadable
+    rng = np.random.default_rng(0)
+    for _ in range(200):
+        n = lg.sample_opponent(rng)
+        assert lg.is_active(n)
+        if n != LATEST:
+            assert n in lg.members
+            if n.startswith("snap:"):                       # scripted bots have no weights file
+                assert os.path.exists(lg.members[n]["path"])
+    # recording a result for an evicted opponent still updates Elo instead of raising
+    before = lg.elo[LATEST]
+    lg.record(evicted[0], 1.0)
+    assert lg.elo[LATEST] > before
+    assert lg.elo[evicted[0]] < 1000.0
+    # weights of evicted snapshots stay on disk so eval --opponents pool can still use them
+    assert os.path.exists(os.path.join(str(tmp_path), evicted[0].replace(":", "_") + ".pt"))
+    lg.save()
+    League(str(tmp_path)).load()

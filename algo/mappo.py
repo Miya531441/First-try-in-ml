@@ -130,6 +130,8 @@ class MAPPOTrainer:
 
     def _opp_net(self, name: str) -> ActorCritic:
         if name not in self.opp_nets:
+            if name not in self.league.members:
+                raise KeyError(f"opponent {name} is no longer in the league pool")
             if len(self.opp_nets) >= 8:
                 self.opp_nets.pop(next(iter(self.opp_nets)))
             net = build_policy(self.cfg, self.env)
@@ -137,6 +139,14 @@ class MAPPOTrainer:
             net.eval()
             self.opp_nets[name] = net
         return self.opp_nets[name]
+
+    def _drop_evicted_opponents(self):
+        """Re-point envs whose opponent was just evicted from the pool, and free its net."""
+        for e, name in enumerate(self.env_opp):
+            if not self.league.is_active(name):
+                self.env_opp[e] = self.league.sample_opponent(self.rng)
+        for name in [n for n in self.opp_nets if not self.league.is_active(n)]:
+            self.opp_nets.pop(name, None)
 
     def _policy_input(self) -> np.ndarray:
         return self.fs.get() if self.fs else self.obs
@@ -426,6 +436,7 @@ class MAPPOTrainer:
             self.update_idx += 1
             if self.update_idx % self.snapshot_every == 0 and not self.league.scripted_only:
                 self.league.add_snapshot(self.policy, self.update_idx)
+                self._drop_evicted_opponents()
             if self.update_idx % log_every == 0:
                 logs = {**roll, **upd, **self.league.summary(), "time/rollout_s": t1 - t0,
                         "time/update_s": time.time() - t1, "time/steps_per_s": self.rollout_len * self.E / (time.time() - t0),

@@ -47,11 +47,19 @@ class League:
         self.elo[name] = self.elo[LATEST]
         self.games[name] = 0
         self.snapshot_names.append(name)
-        # evict the oldest snapshots beyond the cap (keep the very first for reference)
+        # evict the oldest snapshots beyond the cap (keep the very first for reference).
+        # Elo and the on-disk weights are kept so history and `eval.py --opponents pool`
+        # still see them; only pool membership is dropped.
+        self.evicted: List[str] = getattr(self, "evicted", [])
         while len(self.snapshot_names) > self.max_snapshots:
             old = self.snapshot_names.pop(1 if len(self.snapshot_names) > 1 else 0)
-            self.members.pop(old, None)
+            if self.members.pop(old, None) is not None:
+                self.evicted.append(old)
         return name
+
+    def is_active(self, name: str) -> bool:
+        """Whether ``name`` can still be sampled and loaded (LATEST always can)."""
+        return name == LATEST or name in self.members
 
     def pool(self) -> List[str]:
         return list(self.members.keys())
@@ -67,24 +75,31 @@ class League:
 
     # ------------------------------------------------------------- results
     def record(self, opponent: str, score: float):
-        """``score``: 1 learner win, 0 loss, 0.5 draw (from the latest policy's view)."""
+        """``score``: 1 learner win, 0 loss, 0.5 draw (from the latest policy's view).
+
+        An opponent evicted from the pool mid-episode still updates Elo, but has no
+        membership entry left to update a win rate on."""
         if opponent == LATEST:
             self.games[LATEST] += 1
+            return
+        if opponent not in self.elo:
             return
         ra, rb = self.elo[LATEST], self.elo[opponent]
         ea = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
         self.elo[LATEST] = ra + self.elo_k * (score - ea)
         self.elo[opponent] = rb - self.elo_k * (score - ea)
         self.games[LATEST] += 1
-        self.games[opponent] += 1
-        m = self.members[opponent]
-        m["winrate"] = (1 - self.ema) * m["winrate"] + self.ema * (1.0 - score)
+        self.games[opponent] = self.games.get(opponent, 0) + 1
+        m = self.members.get(opponent)
+        if m is not None:
+            m["winrate"] = (1 - self.ema) * m["winrate"] + self.ema * (1.0 - score)
 
     def summary(self) -> Dict[str, float]:
         out = {"elo/latest": self.elo[LATEST]}
         for n in self.pool():
             out[f"elo/{n}"] = self.elo[n]
             out[f"winrate_vs_latest/{n}"] = self.members[n]["winrate"]
+        out["league/pool_size"] = len(self.members)
         return out
 
     def save(self):
