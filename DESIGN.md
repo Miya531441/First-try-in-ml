@@ -183,6 +183,54 @@ These change the incentive balance that produced the blob but are not by themsel
 evidence it is fixed; a comparison run against `ablations/small_arena.yaml` settings or the
 previous defaults is the way to check.
 
+## Result of the three changes, and the root cause they exposed
+
+A 600-update run (3.69M steps, conv encoder, fixed 3v3) completed cleanly, confirming the
+league eviction fix.  Compared against the previous run over the same 420-update window:
+
+| metric | old | new | |
+|---|---|---|---|
+| Elo | 1093 | 1186 | better |
+| win rate vs bots | 0.356 | 0.433 | better |
+| shot accuracy | 0.128 | 0.143 | better |
+| time to first contact | 11.2 s | 7.1 s | better |
+| draw rate | 0.025 | 0.373 | **worse** |
+| episode length | 494 | 968 | **worse** |
+| coverage entropy | 0.485 | 0.444 | still falling |
+| mean engagement angle | 38.2 deg | 13.1 deg | **worse** |
+| flank fraction | 0.182 | 0.043 | **worse** |
+| crossfire rate | 0.002 | 0.000 | still zero |
+| discriminator accuracy | 0.363 | 0.357 | still chance |
+
+Combat skill improved and friendly fire is no longer driven to exactly zero, so the -0.1
+per hp change did what it was meant to.  But coordination did not appear, engagements
+became *more* frontal, and episodes turned into long stalemates that the new timeout
+penalty failed to prevent.
+
+**Root cause: the discount horizon is 15x shorter than an episode.**  With `gamma=0.99` at
+20 Hz the effective horizon is `1/(1-gamma)` = 100 steps = **5 seconds**, against 1500-step
+**75-second** episodes.  Discounted back to the start of an episode, the -0.5 timeout
+penalty is worth 1.4e-7, roughly 4e-7 of a single enemy hit (0.34 undiscounted).  A
+terminal reward retains even 1% of its face value only over the last 458 steps, 30% of the
+episode.
+
+This explains all three failures at once, and supersedes the earlier "friendly fire is the
+problem" diagnosis:
+* The timeout penalty cannot influence behaviour it is meant to shape, because it is
+  invisible everywhere except the last few seconds.
+* Winning and losing are nearly invisible too, so the policy optimises dense damage reward
+  over a 5-second window rather than the outcome of the round.
+* Flanking, splitting and crossfire all pay off over tens of seconds.  Under a 5-second
+  horizon, walking around an obstacle is pure cost with the benefit discounted to nothing,
+  so clumping and firing frontally is locally optimal.
+
+**Recommended next step** (not applied; it changes the learning problem, not a constant):
+raise the horizon so terminal rewards and multi-second tactics are actually valued.
+`gamma=0.997` gives a 333-step / 16.7 s horizon, `gamma=0.999` gives 1000 steps / 50 s.
+Cutting `env.max_steps` from 1500 to about 600 (30 s) is a complementary lever that also
+makes each episode 2.5x cheaper to collect.  Doing both is the cheapest path to testing
+whether coordination is learnable here at all.
+
 ## Assumptions carried over from v1
 
 * **Frames.** Local frame is x forward, y left.  Team B's world is point-mirrored about the
