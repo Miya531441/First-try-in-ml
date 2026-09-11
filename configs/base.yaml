@@ -34,7 +34,7 @@ env:
   # sensing
   vision_fov_deg: 60.0
   vision_range: 84.0                 # >= arena diagonal (83.1 m): the cone is limited by walls, not by range
-  num_rays: 64                       # 0.95 deg spacing resolves a 2 m body at 84 m
+  num_rays: 96                       # 0.63 deg spacing: ~2 rays across a 2 m body at 84 m
   map_rays: 64
   # weapon
   hp: 100
@@ -56,10 +56,11 @@ env:
   reward:
     win: 1.0
     loss: -1.0
-    draw: -0.3                       # a timeout is bad for both teams, so hiding is not a way out
+    draw: 0.0                        # the timeout penalty below is what punishes an undecided fight
     damage_dealt: 0.01
     damage_taken: -0.005
-    friendly_damage: -1.0            # per hp point (-34 per hit), see DESIGN.md
+    friendly_damage: -0.1            # per hp point (-3.4 per hit); -1.0 drove squads into a blob, see DESIGN.md
+    timeout: -0.5                    # to BOTH teams when the clock runs out, on top of the outcome
     kill: 0.5
     kill_split: false
     death: -0.5

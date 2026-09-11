@@ -159,6 +159,30 @@ before it can pay off.  Candidate fixes, roughly in order of expected effect:
    bonus never bootstraps because crossfire essentially never happens by chance.
 4. Add an explicit anti-clumping term, or make friendly fire a function of proximity.
 
+## Changes made in response to the blob result
+
+Three changes, aimed at the role-collapse finding above.
+
+* **Ray density 64 -> 96.**  At 84 m a 2 m body subtends 1.364 degrees; 64 rays were 0.952
+  degrees apart, so a distant enemy registered on a single ray and vanished between frames
+  as it drifted.  96 rays give 0.632 degree spacing, so at least two rays cover a body even
+  at the arena diagonal (`test_ray_density_resolves_a_body_with_margin` pins the >= 2
+  margin).  Cost: 409 -> 324 env-steps/s, about 21%, and the observation grows to 608.
+* **Explicit timeout penalty, `reward.timeout = -0.5`.**  Applied to *both* teams whenever
+  the clock runs out, on top of the outcome reward, so a stalling squad cannot dodge a
+  loss and even the hp-tiebreak winner is penalised for not finishing.  `reward.draw` is
+  back to 0.0 now that the timeout itself carries the penalty; the two used to be
+  conflated, which meant that with the tiebreak on, the draw penalty almost never fired.
+* **Friendly fire -1.0 -> -0.1 per hp**, so a friendly hit costs 3.4 instead of 34.  The
+  old value made a single mistaken shot 34x worse than losing the round, which is why the
+  squads learned to stack up and face the same way: clumping drove friendly fire to exactly
+  0.000 and nothing else mattered as much.  Friendly fire remains un-annealed, and at 3.4 it
+  still costs more than a full enemy kill is worth (1.02 + 0.5).
+
+These change the incentive balance that produced the blob but are not by themselves
+evidence it is fixed; a comparison run against `ablations/small_arena.yaml` settings or the
+previous defaults is the way to check.
+
 ## Assumptions carried over from v1
 
 * **Frames.** Local frame is x forward, y left.  Team B's world is point-mirrored about the

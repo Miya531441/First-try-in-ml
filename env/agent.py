@@ -11,10 +11,11 @@ import numpy as np
 class RewardConfig:
     win: float = 1.0
     loss: float = -1.0
-    draw: float = 0.0
+    draw: float = 0.0                 # outcome reward for an undecided episode
+    timeout: float = -0.5             # extra penalty to BOTH teams when the clock runs out
     damage_dealt: float = 0.01        # per hp point dealt to an enemy
     damage_taken: float = -0.005      # per hp point taken
-    friendly_damage: float = -1.0     # per hp point dealt to an ally (never annealed)
+    friendly_damage: float = -0.1     # per hp point dealt to an ally (-3.4 per hit, never annealed)
     kill: float = 0.5                 # per enemy kill, to every teammate who damaged it
     kill_split: bool = False          # split the kill bonus equally among contributors
     death: float = -0.5
@@ -70,7 +71,7 @@ class EnvConfig:
     # sensing
     vision_fov_deg: float = 60.0
     vision_range: float = 84.0                            # >= arena diagonal (83.1 m): the cone reaches the far wall
-    num_rays: int = 64                                    # spacing must resolve a 2 m body at max range
+    num_rays: int = 96                                    # spacing must resolve a 2 m body at max range
     map_rays: int = 64
     # weapon
     hp: float = 100.0
@@ -83,7 +84,7 @@ class EnvConfig:
     spread_rest_deg: float = 0.5
     spread_max_deg: float = 2.0
     friendly_fire: bool = True
-    timeout_hp_tiebreak: bool = False
+    timeout_hp_tiebreak: bool = True
     # team information
     comms: str = "full"                                   # full | contacts_only | none
     track_staleness_cap: float = 10.0

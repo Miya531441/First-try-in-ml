@@ -135,7 +135,8 @@ def test_friendly_fire_penalty_and_toggle():
         _, _, rew, _, info = env.step(a)
         assert info["hit_ally"][0, 0]
         if ff:
-            assert env.state.hp[0, 1] == pytest.approx(66) and rew[0, 0] < -30
+            assert env.state.hp[0, 1] == pytest.approx(66)
+            assert rew[0, 0] == pytest.approx(cfg.reward.friendly_damage * cfg.damage + cfg.reward.step, abs=1e-5)
         else:
             assert env.state.hp[0, 1] == 100 and rew[0, 0] == pytest.approx(cfg.reward.step)
 
@@ -461,3 +462,75 @@ def test_weapon_range_can_be_shorter_than_sight():
         env.state.cooldown[0] = 0.0
         _, _, _, _, info = env.step(a)
         assert bool(info["hit_enemy"][0, 0]) is should_hit
+
+
+def test_timeout_penalises_both_teams():
+    """Running out the clock costs both squads, on top of whatever outcome the hp
+    tiebreak names, so stalling is never a way to dodge a loss."""
+    cfg = _cfg(na=1, nb=1, max_steps=3, timeout_hp_tiebreak=True)
+    rw = cfg.reward
+    assert rw.timeout < 0
+    env = SquadVecEnv(cfg, 1, seed=1)
+    _place(env, np.array([[6.0, 24.0], [40.0, 24.0]]), np.array([0.0, np.pi]))
+    env.state.hp[0] = [100.0, 60.0]                       # team 0 ahead on hp
+    for _ in range(cfg.max_steps - 1):
+        _, _, rew, done, info = env.step(np.zeros((1, 2, 4), np.float32))
+        assert not done[0]
+    _, _, rew, done, info = env.step(np.zeros((1, 2, 4), np.float32))
+    assert done[0] and info["timeout"][0]
+    assert info["winner"][0] == 0                          # tiebreak awards the healthier squad
+    assert rew[0, 0] == pytest.approx(rw.win + rw.timeout + rw.step, abs=1e-5)
+    assert rew[0, 1] == pytest.approx(rw.loss + rw.timeout + rw.step, abs=1e-5)
+    assert rew[0, 0] < rw.win                              # the winner is still penalised for stalling
+    # an exact stalemate: both take the draw reward plus the timeout penalty
+    env2 = SquadVecEnv(cfg, 1, seed=1)
+    _place(env2, np.array([[6.0, 24.0], [40.0, 24.0]]), np.array([0.0, np.pi]))
+    for _ in range(cfg.max_steps):
+        _, _, rew, done, info = env2.step(np.zeros((1, 2, 4), np.float32))
+    assert done[0] and info["winner"][0] == -1
+    assert rew[0, 0] == pytest.approx(rw.draw + rw.timeout + rw.step, abs=1e-5)
+    # a decisive kill inside the clock carries no timeout penalty
+    cfg3 = _cfg(na=1, nb=1, max_steps=400, spread_rest_deg=0.0, spread_max_deg=0.0)
+    cfg3.role_rewards.enabled = False
+    env3 = SquadVecEnv(cfg3, 1, seed=1)
+    _place(env3, np.array([[10.0, 24.0], [20.0, 24.0]]), np.array([0.0, np.pi]))
+    env3.state.hp[0, 1] = 34.0
+    a = np.zeros((1, 2, 4), np.float32)
+    a[0, 0, 3] = 1.0
+    _, _, rew, done, info = env3.step(a)
+    assert done[0] and not info["timeout"][0] and info["winner"][0] == 0
+    assert rew[0, 0] == pytest.approx(0.34 + cfg3.reward.kill + cfg3.reward.win + cfg3.reward.step, abs=1e-5)
+
+
+def test_friendly_fire_penalty_is_survivable():
+    """A friendly hit should hurt less than losing the round, so spreading out stays
+    affordable (at -1.0/hp a single hit cost -34, which collapsed squads into a blob)."""
+    cfg = EnvConfig()
+    per_hit = abs(cfg.reward.friendly_damage) * cfg.damage
+    assert per_hit < abs(cfg.reward.loss) * 5, "a friendly hit must not dwarf the terminal reward"
+    c = _cfg(na=2, nb=1, team_size=2, spread_rest_deg=0.0, spread_max_deg=0.0)
+    c.role_rewards.enabled = False
+    env = SquadVecEnv(c, 1, seed=1)
+    _place(env, np.array([[10.0, 20.0], [16.0, 20.0], [40.0, 40.0], [44.0, 44.0]]),
+           np.array([0.0, 0.0, np.pi, np.pi]))
+    a = np.zeros((1, 4, 4), np.float32)
+    a[0, 0, 3] = 1.0
+    _, _, rew, _, info = env.step(a)
+    assert info["hit_ally"][0, 0]
+    assert rew[0, 0] == pytest.approx(c.reward.friendly_damage * c.damage + c.reward.step, abs=1e-5)
+    assert per_hit == pytest.approx(3.4, abs=1e-6)         # was 34.0 at the old -1.0/hp
+
+
+def test_ray_density_resolves_a_body_with_margin():
+    cfg = EnvConfig()
+    spacing = np.deg2rad(cfg.vision_fov_deg) / (cfg.num_rays - 1)
+    subtended = 2 * np.arctan(cfg.collision_radius / cfg.vision_range)
+    assert subtended / spacing >= 2.0, "want at least two rays across a body at maximum range"
+    env = SquadVecEnv(_cfg(na=1, nb=1), 1, seed=1)
+    S = cfg.arena_size
+    for dist in (20.0, 35.0, 50.0):
+        _place(env, np.array([[2.0, S / 2], [2.0 + dist, S / 2]]), np.array([0.0, np.pi]))
+        assert (env.ray_kind[0, 0] == 2).sum() >= 2, f"enemy at {dist} m spans fewer than 2 rays"
+    # and across the full diagonal, the longest sightline the arena allows
+    _place(env, np.array([[1.5, 1.5], [S - 1.5, S - 1.5]]), np.array([np.pi / 4, np.pi]))
+    assert (env.ray_kind[0, 0] == 2).sum() >= 2

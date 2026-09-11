@@ -458,13 +458,18 @@ class SquadVecEnv:
             tb = timeout & a_alive & b_alive
             winner[tb & (hp_a > hp_b)] = 0
             winner[tb & (hp_b > hp_a)] = 1
-        term = np.where(winner[:, None] == st.team, rw.win, np.where(winner[:, None] < 0, rw.draw, rw.loss)) * st.active
+        term = np.where(winner[:, None] == st.team, rw.win, np.where(winner[:, None] < 0, rw.draw, rw.loss))
+        # running out the clock is penalised for both teams, on top of the outcome reward,
+        # so stalling is never a way to avoid a loss (the hp tiebreak may still name a winner)
+        term = term + rw.timeout * timeout[:, None]
+        term = term * st.active
         reward += term * done[:, None]
         self.ep_reward += term * done[:, None]
         reward *= st.active
 
         info: Dict[str, Any] = {"fire": fire, "hit_enemy": enemy_hit, "hit_ally": friendly, "engage_angle": eng,
-                                "sees_enemy": sees_enemy, "alive": st.alive.copy(), "winner": winner, "t": self.t.copy()}
+                                "sees_enemy": sees_enemy, "alive": st.alive.copy(), "winner": winner, "t": self.t.copy(),
+                                "timeout": timeout}
         done_idx = np.nonzero(done)[0]
         if done_idx.size:
             info["episode"] = self._episode_summary(done_idx, winner[done_idx])
@@ -485,6 +490,7 @@ class SquadVecEnv:
         hits_team = np.stack([self.ep_hits_enemy[idx, : self.T].sum(-1), self.ep_hits_enemy[idx, self.T:].sum(-1)], -1)
         return {
             "idx": idx, "winner": winner, "length": self.t[idx].copy(), "agent_stats": stats,
+            "timeout": (self.t[idx] >= cfg.max_steps),
             "roles": self.state.role[idx].copy(), "active": self.state.active[idx].copy(),
             "shots": self.ep_shots[idx].copy(), "hits_enemy": self.ep_hits_enemy[idx].copy(),
             "hits_ally": self.ep_hits_ally[idx].copy(),
